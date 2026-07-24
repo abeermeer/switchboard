@@ -23,11 +23,19 @@ no account, no cloud control plane.
 
 ## Demo
 
-[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](brag-output/brag.mp4)
+[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.1.0/brag.mp4)
 
-**[▶ Watch the 20-second walkthrough](brag-output/brag.mp4)** — a provider 429s mid-request,
-the fallback lands on a different one, and the decision trace explains exactly why the
-replacement won. Every number in it is real output from a running instance.
+**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.1.0/brag.mp4)**
+
+A provider 429s mid-request, the fallback lands on a different one, and the decision trace
+explains exactly why the replacement won. Every number on screen is real output from a
+running instance — the response headers, the four candidate scores, the factor notes, and
+the exclusion reason.
+
+That still above is the routing decision for one request: four candidates ranked, the
+winner in copper, the price spread across providers serving the same class of model, and
+`17 eligible · 5 excluded`. Every other gateway gives you a log line; this is the part
+worth showing.
 
 ---
 
