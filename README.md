@@ -46,23 +46,75 @@ and answers three questions the raw SDKs cannot:
 
 ## Quickstart
 
+**1) Install and run**
+
 ```bash
+npm install -g switchboard
+switchboard
+```
+
+That's it. The dashboard is on **http://localhost:7272**, the gateway on
+**http://localhost:7272/v1**.
+
+Your database and encryption key live in your OS application-data directory
+(`%APPDATA%\Switchboard`, `~/Library/Application Support/Switchboard`, or
+`~/.local/share/Switchboard`), so upgrading with `npm update -g switchboard` never touches
+them.
+
+**2) Connect a free provider**
+
+Open the dashboard and pick one. Groq, Cerebras and Google all give real free tiers with
+no payment method. Or from the terminal:
+
+```bash
+sb providers add groq      # prompts for the key, echo off
+```
+
+**3) Create a key and point a tool at it**
+
+```bash
+sb keys new "my laptop"
+```
+
+```bash
+curl http://127.0.0.1:7272/v1/chat/completions \
+  -H "Authorization: Bearer sb-live-your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'
+```
+
+<details>
+<summary><b>Other ways to run it</b></summary>
+
+**From source**
+
+```bash
+git clone https://github.com/abeermeer/switchboard.git
+cd switchboard
 npm install
 npm run build
 npm start
 ```
 
-Open **http://localhost:7272** — the dashboard walks you through connecting a provider
-and creating a key.
-
-Or from the CLI:
+**Docker**
 
 ```bash
-node bin/sb.mjs start --open
+docker build -t switchboard .
+docker run -d -p 7272:7272 -v switchboard-data:/data switchboard
 ```
 
-Then connect a free provider (Groq, Cerebras and Google all give real free tiers with no
-card), create an API key, and point something at it:
+**Desktop app** — `npm run electron:build:win` (or `:mac` / `:linux`) puts an installer in
+`release/`. Runs in the tray with start-at-login.
+
+**Pin to a release line** — every version is branched, so you can track one:
+
+```bash
+npm install -g switchboard@0.1.0
+```
+
+</details>
+
+Then point something at it:
 
 ```bash
 curl http://127.0.0.1:7272/v1/chat/completions \
@@ -309,7 +361,27 @@ Built with Next.js 16, React 19,
 TypeScript 5.9 in strict mode with `noUncheckedIndexedAccess`, and Tailwind CSS v4.
 
 Adding a provider is a single entry in `src/lib/providers/catalog.ts` when it speaks the
-OpenAI wire format — see `docs/development.md`.
+OpenAI wire format — see [docs/development.md](docs/development.md).
+
+Conventions for humans and agents are in [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md);
+contribution workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Releases
+
+`main` is the development line. Every version is also cut as a `release/vX.Y.Z` branch with
+a matching tag and GitHub release, so you can pin to one and keep receiving fixes for that
+line without inheriting whatever landed on `main` today.
+
+Bumping `version` in `package.json` on `main` triggers it: CI typechecks, builds, boots the
+gateway, verifies the publish tarball carries no database or key, then branches, tags and
+publishes the release.
+
+### Status
+
+Pre-1.0 and honest about it. An external audit put it at **7.2/10** — strong on
+architecture, resilience and type safety; the standing gaps are **no test suite**,
+in-memory rate limiting, and no structured logging. Those are tracked and being worked
+through. Do not run it exposed to the internet without a reverse proxy and auth in front.
 
 ---
 

@@ -12,6 +12,25 @@
   "engines": {
     "node": ">=22.13.0"
   },
+  "homepage": "https://github.com/abeermeer/switchboard#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abeermeer/switchboard.git"
+  },
+  "bugs": {
+    "url": "https://github.com/abeermeer/switchboard/issues"
+  },
+  "author": "Abeer Meer",
+  "files": [
+    ".next",
+    "bin",
+    "public",
+    "src",
+    "next.config.ts",
+    "postcss.config.mjs",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "ai",
     "gateway",
@@ -29,6 +48,8 @@
     "start": "next start -p 7272",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
+    "prepublishOnly": "npm run typecheck && npm run build",
+    "pack:check": "npm pack --dry-run",
     "electron:dev": "concurrently -k -n next,electron \"npm:dev\" \"wait-on tcp:7272 && cross-env SWITCHBOARD_DEV=1 electron electron/main.cjs\"",
     "electron:build": "npm run build && electron-builder --config electron/builder.config.cjs",
     "electron:build:win": "npm run build && electron-builder --win --config electron/builder.config.cjs"

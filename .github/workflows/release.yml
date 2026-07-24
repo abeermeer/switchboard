@@ -1,0 +1,144 @@
+name: Release
+
+# Cuts a release whenever the version in package.json changes on main.
+#
+# The branch-per-version layout mirrors how the gateway itself is meant to be
+# run: someone pinned to release/v0.1.0 keeps getting fixes for that line
+# without inheriting whatever is landing on main today.
+on:
+  push:
+    branches: [main]
+    paths: ['package.json']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (blank = read from package.json)'
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Cut release branch and tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the tag and branch carry real ancestry.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "branch=release/v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$VERSION"
+
+      # A version bump that reuses an existing tag would silently move it and
+      # break anyone already pinned there, so stop instead.
+      - name: Check the tag is new
+        id: exists
+        run: |
+          if git rev-parse "${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${{ steps.v.outputs.tag }} already exists — nothing to do."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install
+        if: steps.exists.outputs.already == 'false'
+        run: npm ci
+
+      - name: Typecheck
+        if: steps.exists.outputs.already == 'false'
+        run: npm run typecheck
+
+      - name: Build
+        if: steps.exists.outputs.already == 'false'
+        run: npm run build
+
+      # Publishing a package that cannot start is worse than not publishing.
+      - name: Smoke test the build
+        if: steps.exists.outputs.already == 'false'
+        run: |
+          npx next start -p 7272 &
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7272/api/system/status || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:7272/api/system/status > /dev/null
+          curl -fsS http://127.0.0.1:7272/v1/models > /dev/null
+          echo "gateway serves"
+
+      # Confirms the tarball is installable and, critically, that it carries no
+      # database or master key.
+      - name: Verify the publish tarball
+        if: steps.exists.outputs.already == 'false'
+        run: |
+          npm pack --dry-run 2>&1 | tee /tmp/pack.txt
+          if grep -qiE 'master\.key|\.db$|(^|/)data/|\.env$' /tmp/pack.txt; then
+            echo "::error::Publish tarball contains secrets or local state"
+            exit 1
+          fi
+          echo "tarball clean"
+
+      - name: Create the release branch
+        if: steps.exists.outputs.already == 'false'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git branch "${{ steps.v.outputs.branch }}"
+          git push origin "${{ steps.v.outputs.branch }}"
+
+      - name: Tag
+        if: steps.exists.outputs.already == 'false'
+        run: |
+          git tag -a "${{ steps.v.outputs.tag }}" -m "Switchboard ${{ steps.v.outputs.tag }}"
+          git push origin "${{ steps.v.outputs.tag }}"
+
+      - name: Publish the GitHub release
+        if: steps.exists.outputs.already == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES=$(cat <<'EOF'
+          Install or upgrade:
+
+          ```bash
+          npm install -g switchboard
+          switchboard
+          ```
+
+          Dashboard on http://localhost:7272 · endpoint on http://localhost:7272/v1
+
+          This release is also branched as `${{ steps.v.outputs.branch }}` if you
+          want to pin to it.
+          EOF
+          )
+          ASSETS=""
+          [ -f brag-output/brag.mp4 ] && ASSETS="$ASSETS brag-output/brag.mp4"
+          [ -f brag-output/brag.jpg ] && ASSETS="$ASSETS brag-output/brag.jpg"
+
+          gh release create "${{ steps.v.outputs.tag }}" \
+            --title "Switchboard ${{ steps.v.outputs.tag }}" \
+            --notes "$NOTES" \
+            --target "${{ steps.v.outputs.branch }}" \
+            $ASSETS

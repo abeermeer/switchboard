@@ -39,13 +39,16 @@ export function table(columns, rows) {
   }
 }
 
-export function banner(port) {
+export function banner(port, dataDir) {
   const url = `http://127.0.0.1:${port}`;
   console.log('');
   console.log(`  ${pc.bold(pc.yellow('Switchboard'))} ${pc.dim('· local-first AI gateway')}`);
   console.log('');
   console.log(`  ${pc.dim('Endpoint  ')}${pc.bold(`${url}/v1`)}`);
   console.log(`  ${pc.dim('Dashboard ')}${url}/dashboard`);
+  // Surfaced because it is where the master key lives, and the one path a user
+  // needs to know to back up or migrate their install.
+  if (dataDir !== undefined) console.log(`  ${pc.dim('Data      ')}${pc.dim(dataDir)}`);
   console.log('');
   console.log(pc.dim('  Point any OpenAI-compatible tool at the endpoint above and'));
   console.log(pc.dim('  send model "auto" to let Switchboard choose the provider.'));

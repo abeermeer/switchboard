@@ -6,12 +6,34 @@ import { createInterface } from 'node:readline';
 import { existsSync, accessSync, constants } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import pc from 'picocolors';
 import { api, baseUrl } from './lib/client.mjs';
 import { banner, dot, fail, info, money, ms, ok, table, warn } from './lib/render.mjs';
+import { resolveDataDir } from './lib/dataDir.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * Locate Next's CLI entry through node's own resolver.
+ *
+ * Hardcoding `<root>/node_modules/next` only works for a repo checkout. On a
+ * global install npm hoists dependencies, so next can sit anywhere up the tree
+ * — resolving it is the difference between `npm i -g switchboard` working and
+ * failing with ENOENT on a path the user cannot see.
+ */
+function resolveNextBin() {
+  try {
+    return createRequire(import.meta.url).resolve('next/dist/bin/next');
+  } catch {
+    const local = join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
+    if (existsSync(local)) return local;
+    console.error(pc.red('Could not find the Next.js runtime.'));
+    console.error(pc.dim('  Reinstall Switchboard:  npm install -g switchboard'));
+    process.exit(1);
+  }
+}
 const program = new Command();
 
 program
@@ -33,11 +55,23 @@ program
   .option('--open', 'open the dashboard once it is ready')
   .action(async (options) => {
     const port = Number(options.port);
-    banner(port);
 
-    const child = spawn(process.execPath, [join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(port)], {
+    if (!existsSync(join(root, '.next'))) {
+      fail('No production build found.');
+      info('From a repo checkout, run:  npm run build');
+      info('If you installed globally, reinstall:  npm install -g switchboard');
+      process.exit(1);
+    }
+
+    // Pinned explicitly so the database never lands inside node_modules, where
+    // the next `npm update -g` would delete it along with every stored key.
+    const dataDir = resolveDataDir(root);
+
+    banner(port, dataDir);
+
+    const child = spawn(process.execPath, [resolveNextBin(), 'start', '-p', String(port)], {
       cwd: root,
-      env: { ...process.env, PORT: String(port) },
+      env: { ...process.env, PORT: String(port), SWITCHBOARD_DATA_DIR: dataDir },
       stdio: 'inherit',
     });
 
