@@ -9,7 +9,9 @@ npm run typecheck    # tsc --noEmit
 npm run build
 ```
 
-Node **22.5+** is required for `node:sqlite`. Node 24 is what this was built and tested on.
+Node **22.13+** is required. `node:sqlite` shipped in 22.5 but was gated behind
+`--experimental-sqlite` until 22.13, so older releases throw `ERR_UNKNOWN_BUILTIN_MODULE`
+at build time. Node 24 is what this was built and tested on.
 
 ## Repo layout
 

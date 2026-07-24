@@ -300,7 +300,8 @@ npm run build        # production build
 npm run electron:dev # desktop shell against the dev server
 ```
 
-Requires **Node 22.5+** (for `node:sqlite`). Built with Next.js 16, React 19,
+Requires **Node 22.13+** — `node:sqlite` appeared in 22.5 but was flag-gated until 22.13.
+Built with Next.js 16, React 19,
 TypeScript 5.9 in strict mode with `noUncheckedIndexedAccess`, and Tailwind CSS v4.
 
 Adding a provider is a single entry in `src/lib/providers/catalog.ts` when it speaks the

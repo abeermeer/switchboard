@@ -387,9 +387,13 @@ program
     console.log(`  ${pc.bold('Switchboard doctor')}`);
     console.log('');
 
-    const major = Number(process.versions.node.split('.')[0]);
-    if (major >= 22) ok(`Node ${process.versions.node}`);
-    else fail(`Node ${process.versions.node} — node:sqlite needs 22.5 or newer`);
+    // Compare minor too. node:sqlite exists from 22.5 but stayed behind
+    // --experimental-sqlite until 22.13, so a major-only check would pass a
+    // version that cannot actually open the database.
+    const [major, minor] = process.versions.node.split('.').map(Number);
+    const nodeOk = major > 22 || (major === 22 && minor >= 13);
+    if (nodeOk) ok(`Node ${process.versions.node}`);
+    else fail(`Node ${process.versions.node} — node:sqlite needs 22.13 or newer`);
 
     try {
       await import('node:sqlite');

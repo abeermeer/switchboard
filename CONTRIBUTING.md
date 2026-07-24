@@ -9,8 +9,9 @@ npm install
 npm run dev          # http://localhost:7272
 ```
 
-Node **22.5 or newer** is required — Switchboard uses the built-in `node:sqlite`, which does
-not exist in older releases. Node 24 is what it is developed against.
+Node **22.13 or newer** is required. Switchboard uses the built-in `node:sqlite`, which
+appeared in 22.5 but stayed behind `--experimental-sqlite` until 22.13 — on anything older
+the build fails with `ERR_UNKNOWN_BUILTIN_MODULE`. Node 24 is what it is developed against.
 
 ## Before you open a PR
 
