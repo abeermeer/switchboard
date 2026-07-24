@@ -17,6 +17,16 @@ no account, no cloud control plane.
 
 ---
 
+## Demo
+
+[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](brag-output/brag.mp4)
+
+**[▶ Watch the 20-second walkthrough](brag-output/brag.mp4)** — a provider 429s mid-request,
+the fallback lands on a different one, and the decision trace explains exactly why the
+replacement won. Every number in it is real output from a running instance.
+
+---
+
 ## Why
 
 Running six provider SDKs across four tools means six sets of keys, six failure modes, and

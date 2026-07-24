@@ -1,0 +1,5 @@
+Introducing Switchboard: one OpenAI-compatible endpoint in front of 16 LLM providers, routing to free tiers first and failing over automatically when one goes down.
+
+Every gateway claims "smart routing." This one shows its work — every candidate it considered, every weighted factor, and the exact reason each one lost.
+
+github.com/abeermeer/switchboard

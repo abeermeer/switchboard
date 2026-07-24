@@ -24,3 +24,9 @@ master.key
 Thumbs.db
 next-env.d.ts
 tsconfig.tsbuildinfo
+
+# Brag video source assets. The rendered brag.mp4 embeds them as intended use,
+# but the raw music/SFX files are third-party licensed and are not ours to
+# redistribute in a public repo. Regenerate from the /brag skill assets.
+brag-output/composition/assets/
+brag-output/composition/vendor/
