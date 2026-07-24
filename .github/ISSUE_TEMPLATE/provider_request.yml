@@ -1,0 +1,52 @@
+name: Add a provider
+description: Request support for a provider that is not in the catalog
+labels: [provider]
+body:
+  - type: input
+    id: name
+    attributes:
+      label: Provider name
+    validations:
+      required: true
+
+  - type: input
+    id: base_url
+    attributes:
+      label: Base URL
+      placeholder: https://api.example.com/v1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: wire
+    attributes:
+      label: Wire format
+      description: >
+        If it is OpenAI-compatible, adding it is a single catalog entry and no new code.
+      options:
+        - OpenAI-compatible
+        - Anthropic Messages
+        - Google generateContent
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: pricing
+    attributes:
+      label: Pricing page
+      description: >
+        Required. Prices drive the tier ladder, the cost ceiling and every figure in
+        analytics, so they have to come from the provider rather than memory.
+      placeholder: https://example.com/pricing
+    validations:
+      required: true
+
+  - type: textarea
+    id: free_tier
+    attributes:
+      label: Free tier, if any
+      description: The exact published allowance, and whether it needs a payment method.
+      placeholder: 14,400 requests/day on small models, no card required
+    validations:
+      required: false

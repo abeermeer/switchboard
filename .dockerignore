@@ -1,0 +1,13 @@
+node_modules
+.next
+release
+dist
+data
+electron
+.git
+.gitignore
+*.log
+.env
+.env.local
+README.md
+docs

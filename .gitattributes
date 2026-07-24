@@ -1,0 +1,13 @@
+# Normalize to LF in the repository regardless of the contributor's platform.
+# Without this a Windows checkout commits CRLF and every cross-platform PR
+# arrives as a whole-file diff.
+* text=auto eol=lf
+
+# Shell scripts and the CLI must keep LF even on a Windows checkout — CRLF in a
+# shebang line breaks the interpreter.
+*.sh   text eol=lf
+*.mjs  text eol=lf
+
+*.png  binary
+*.ico  binary
+*.icns binary

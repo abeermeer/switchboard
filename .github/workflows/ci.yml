@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push to a branch makes the previous run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build · Node ${{ matrix.node }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is in the matrix on purpose: storage is node:sqlite precisely
+        # so installs never need a native toolchain, and that claim is worth
+        # proving on every commit.
+        os: [ubuntu-latest, windows-latest]
+        node: ['22.5', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Boot the gateway and probe it
+        shell: bash
+        run: |
+          npx next start -p 7272 &
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7272/api/system/status || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+
+          # A build that compiles but cannot serve /v1/models is not a build.
+          curl -fsS http://127.0.0.1:7272/api/system/status > /dev/null
+          curl -fsS http://127.0.0.1:7272/v1/models > /dev/null
+          curl -fsS -X POST http://127.0.0.1:7272/api/system/bootstrap > /dev/null
+          echo "gateway responded on all smoke endpoints"

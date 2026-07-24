@@ -1,0 +1,46 @@
+name: Bug report
+description: Something behaves differently than documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste an API key, a `sb-live-` token, or the contents of `master.key`.**
+        Redact them before submitting.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what happened, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `sb doctor`
+      description: Run `node bin/sb.mjs doctor` and paste the result.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: providers
+    attributes:
+      label: Providers involved
+      placeholder: groq, cerebras
+    validations:
+      required: false
+
+  - type: textarea
+    id: trace
+    attributes:
+      label: Routing trace
+      description: >
+        For a routing problem, open the request in the dashboard
+        (Requests → the failing request → Decision trace) and paste what it shows,
+        or the `x-switchboard-*` response headers from curl.
+      render: text
+    validations:
+      required: false

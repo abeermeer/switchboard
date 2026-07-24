@@ -1,0 +1,7 @@
+{
+  "name": "switchboard-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Switchboard desktop shell",
+  "main": "main.cjs"
+}

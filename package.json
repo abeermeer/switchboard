@@ -1,0 +1,61 @@
+{
+  "name": "switchboard",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Switchboard — a local-first AI gateway. One OpenAI-compatible endpoint, every provider, free-first smart routing with automatic fallback.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "sb": "bin/sb.mjs",
+    "switchboard": "bin/sb.mjs"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "keywords": [
+    "ai",
+    "gateway",
+    "llm",
+    "proxy",
+    "openai",
+    "anthropic",
+    "router",
+    "fallback",
+    "openai-compatible"
+  ],
+  "scripts": {
+    "dev": "next dev --turbopack -p 7272",
+    "build": "next build",
+    "start": "next start -p 7272",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint",
+    "electron:dev": "concurrently -k -n next,electron \"npm:dev\" \"wait-on tcp:7272 && cross-env SWITCHBOARD_DEV=1 electron electron/main.cjs\"",
+    "electron:build": "npm run build && electron-builder --config electron/builder.config.cjs",
+    "electron:build:win": "npm run build && electron-builder --win --config electron/builder.config.cjs"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "commander": "^15.0.0",
+    "lucide-react": "^1.26.0",
+    "next": "^16.2.11",
+    "picocolors": "^1.1.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "recharts": "^3.10.0",
+    "tailwind-merge": "^3.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "wait-on": "^9.1.0"
+  }
+}
