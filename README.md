@@ -1,5 +1,9 @@
 # Switchboard
 
+[![CI](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522.13-3ecf8e.svg)](https://nodejs.org)
+
 **One endpoint. Every provider. Free tiers first, automatic fallback, everything local.**
 
 Switchboard is an AI gateway that runs on your own machine. Point any OpenAI-compatible
