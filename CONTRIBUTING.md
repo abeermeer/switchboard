@@ -17,11 +17,28 @@ the build fails with `ERR_UNKNOWN_BUILTIN_MODULE`. Node 24 is what it is develop
 
 ```bash
 npm run typecheck    # must be clean
+npm run test:run     # must be green
 npm run build        # must succeed
 ```
 
-Both are enforced in CI. `typecheck` runs `tsc --noEmit` against strict mode with
-`noUncheckedIndexedAccess`, so a PR that compiles locally will compile in CI.
+All three are enforced in CI on Node 22.13 and 24, on Ubuntu and Windows. `typecheck` runs
+`tsc --noEmit` against strict mode with `noUncheckedIndexedAccess`, so a PR that compiles
+locally will compile in CI.
+
+## Tests
+
+Vitest, in `tests/`. Read `tests/unit/vault.test.ts` first — it sets the expected style.
+
+- Any suite that writes rows uses `freshDb()` / `dropDb()` from `tests/helpers/db.ts`.
+  Tests must not depend on execution order.
+- Stub the network with `stubUpstream()` from `tests/helpers/upstream.ts`. It replaces
+  global `fetch`, which is the boundary every adapter goes through, so the real adapter and
+  router still run. **No test may reach a real provider.**
+- Test what the comments claim. If a comment says a behaviour is deliberate, there should
+  be a test that fails when someone removes it.
+
+A change to routing, cost, resilience or the adapters needs a test. A change to the
+dashboard does not yet — there is no component harness — so say what you verified by hand.
 
 ## The shape of the codebase
 

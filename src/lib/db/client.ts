@@ -70,6 +70,30 @@ export function getDb(): DatabaseSync {
   return handle;
 }
 
+/**
+ * Closes the handle and drops both caches, so the next `getDb()` reopens from
+ * whatever `dataDir()` resolves to at that moment.
+ *
+ * Needed for an orderly shutdown — an open WAL handle at exit leaves `-wal` and
+ * `-shm` files behind for the next process to recover — and it is what lets a
+ * test point the whole data layer at a throwaway directory between cases.
+ */
+export function closeDb(): void {
+  const g = globalThis as { __switchboardDb?: DatabaseSync };
+  const handle = db ?? g.__switchboardDb;
+
+  if (handle) {
+    try {
+      handle.close();
+    } catch {
+      // Already closed, or closed underneath us. Either way the caches go.
+    }
+  }
+
+  db = null;
+  delete g.__switchboardDb;
+}
+
 function runMigrations(handle: DatabaseSync): void {
   const row = handle.prepare('PRAGMA user_version').get() as
     | { user_version: number }

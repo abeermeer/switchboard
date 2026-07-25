@@ -43,6 +43,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Runs on every matrix leg rather than once: the suite exercises
+      # node:sqlite and the filesystem directly, which are exactly the things
+      # that differ between Windows and Linux.
+      - name: Test
+        run: npm run test:run
+
       - name: Build
         run: npm run build
 

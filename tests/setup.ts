@@ -1,0 +1,45 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll } from 'vitest';
+
+/**
+ * Points the whole data layer at a throwaway directory for the lifetime of the
+ * test file.
+ *
+ * This runs before any test module is imported, which matters: `dataDir()`
+ * reads the environment on every call, but the master key and the SQLite handle
+ * are cached in module scope on first use. If a test imported the vault before
+ * this ran, it would seal against a key in the developer's real data directory
+ * — and on a dev machine that means the suite could read, or overwrite, live
+ * credentials.
+ */
+const root = mkdtempSync(join(tmpdir(), 'switchboard-test-'));
+
+process.env.SWITCHBOARD_DATA_DIR = root;
+
+// A fixed key keeps the vault deterministic and stops each file from paying for
+// 32 bytes of entropy plus a file write it does not need. Tests that care about
+// key generation delete this and exercise the real path.
+delete process.env.SWITCHBOARD_MASTER_KEY;
+
+// Nothing in the suite should reach the network. Left unset so a stray call to
+// a real provider fails loudly on a bad host rather than quietly succeeding.
+process.env.SWITCHBOARD_ALLOW_REMOTE = '0';
+
+beforeAll(() => {
+  process.env.SWITCHBOARD_DATA_DIR = root;
+});
+
+afterAll(async () => {
+  const { closeDb } = await import('@/lib/db/client');
+  closeDb();
+  try {
+    rmSync(root, { recursive: true, force: true });
+  } catch {
+    // Windows can hold the WAL file briefly after close; a leftover temp
+    // directory is not worth failing a green suite over.
+  }
+});
+
+export const TEST_DATA_DIR = root;

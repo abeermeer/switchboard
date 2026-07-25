@@ -48,7 +48,10 @@
     "start": "next start -p 7272",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
-    "prepublishOnly": "npm run typecheck && npm run build",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:ci": "vitest run --coverage",
+    "prepublishOnly": "npm run typecheck && npm run test:run && npm run build",
     "pack:check": "npm pack --dry-run",
     "electron:dev": "concurrently -k -n next,electron \"npm:dev\" \"wait-on tcp:7272 && cross-env SWITCHBOARD_DEV=1 electron electron/main.cjs\"",
     "electron:build": "npm run build && electron-builder --config electron/builder.config.cjs",
@@ -71,12 +74,14 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "^4.1.10",
     "concurrently": "^10.0.3",
     "cross-env": "^10.1.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.10",
     "wait-on": "^9.1.0"
   }
 }

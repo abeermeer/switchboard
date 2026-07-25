@@ -70,6 +70,10 @@ jobs:
         if: steps.exists.outputs.already == 'false'
         run: npm run typecheck
 
+      - name: Test
+        if: steps.exists.outputs.already == 'false'
+        run: npm run test:run
+
       - name: Build
         if: steps.exists.outputs.already == 'false'
         run: npm run build

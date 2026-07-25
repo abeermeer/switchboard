@@ -374,6 +374,24 @@ OpenAI wire format — see [docs/development.md](docs/development.md).
 Conventions for humans and agents are in [CLAUDE.md](CLAUDE.md) and [AGENTS.md](AGENTS.md);
 contribution workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 
+### Tests
+
+```bash
+npm run test:run     # ~700 tests
+npm run test:ci      # with coverage
+```
+
+Vitest, running on every CI leg. The suite covers the parts where a silent bug costs money
+or loses a request: the scoring model (100%), cost and free-tier settlement (100%), the
+adapter helpers that classify every upstream error (99%), candidate expansion and exclusion
+(95%), the circuit breaker's full state machine, the credential vault, and an integration
+layer that drives the real route handlers against a stubbed provider — including the
+fallback walk itself.
+
+Tests assert the behaviour the code's comments claim, so the deliberate decisions
+(`bad_request` never retries, a started stream is never retried, free tiers settle at $0)
+fail loudly if anyone "simplifies" them away.
+
 ### Releases
 
 `main` is the development line. Every version is also cut as a `release/vX.Y.Z` branch with
@@ -387,9 +405,18 @@ publishes the release.
 ### Status
 
 Pre-1.0 and honest about it. An external audit put it at **7.2/10** — strong on
-architecture, resilience and type safety; the standing gaps are **no test suite**,
-in-memory rate limiting, and no structured logging. Those are tracked and being worked
-through. Do not run it exposed to the internet without a reverse proxy and auth in front.
+architecture, resilience and type safety, with test coverage scored 0/10 as the single
+largest gap.
+
+That gap is now closed for the routing core: ~700 tests covering scoring, cost settlement,
+candidate expansion, the breaker, the vault, the adapter error taxonomy, and the fallback
+walk end to end. Writing them surfaced a real bug — a non-ASCII character in a provider's
+error message crashed the response instead of returning the client's error, which any
+non-English upstream message would have triggered.
+
+Still open: no tests for the DB repositories, the management API or the dashboard; rate
+limiting is in-memory and resets on restart; there is no structured logging. Do not run it
+exposed to the internet without a reverse proxy and auth in front.
 
 ---
 

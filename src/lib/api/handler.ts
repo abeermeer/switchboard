@@ -233,6 +233,28 @@ export async function handleModality(
 }
 
 /**
+ * Makes an arbitrary string safe to put in an HTTP header value.
+ *
+ * Header values are ByteStrings: any code point above 255 makes `new Response`
+ * throw, which would turn a handled upstream failure into an unhandled 500 —
+ * the client would lose the real error entirely. Provider messages routinely
+ * carry curly quotes, em-dashes and non-English text, and one of our own
+ * fallback reasons contains a typographic apostrophe, so this is reachable in
+ * normal operation rather than a theoretical edge case.
+ */
+function headerSafe(value: string): string {
+  return (
+    value
+      .slice(0, 200)
+      .replace(/[\r\n]+/g, ' ')
+      // Replace rather than drop, so a fully non-Latin message still reads as
+      // "something was here" instead of collapsing to an empty header.
+      .replace(/[^\x20-\x7e]/g, '?')
+      .trim() || 'unknown'
+  );
+}
+
+/**
  * Routing telemetry on every response. These headers are how a user debugs a
  * slow or surprising request from curl alone, without opening the dashboard.
  */
@@ -269,7 +291,7 @@ function traceHeaders(
   const failed = decision.attempts.filter((a) => a.status !== 'success');
   if (failed.length > 0) {
     const reason = failed[0]?.fallbackReason ?? failed[0]?.error ?? 'unknown';
-    headers['x-switchboard-fallback-reason'] = reason.slice(0, 200).replace(/[\r\n]+/g, ' ');
+    headers['x-switchboard-fallback-reason'] = headerSafe(reason);
   }
 
   return headers;

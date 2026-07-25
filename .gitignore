@@ -30,3 +30,7 @@ tsconfig.tsbuildinfo
 # redistribute in a public repo. Regenerate from the /brag skill assets.
 brag-output/composition/assets/
 brag-output/composition/vendor/
+
+# Test coverage output
+coverage/
+.vitest/

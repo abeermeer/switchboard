@@ -211,11 +211,13 @@ function describeFallback(err: AdapterError): string {
     case 'network':
       return 'Network failure reaching the provider';
     case 'context_length':
-      return 'Prompt exceeds this model’s context window';
+      // Plain ASCII on purpose: these strings reach an HTTP header, where a
+      // typographic apostrophe is not representable.
+      return "Prompt exceeds this model's context window";
     case 'unsupported':
       return 'Model or feature unavailable here';
     case 'bad_request':
-      return 'Request rejected — not retried elsewhere';
+      return 'Request rejected - not retried elsewhere';
     default:
       return err.message;
   }

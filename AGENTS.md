@@ -23,16 +23,29 @@ Requires Node **22.13+**. `node:sqlite` was flag-gated until 22.13.
 
 ## Validation
 
-Run both before proposing any change. CI enforces them on Node 22.13 and 24, on Ubuntu and
-Windows.
+Run all three before proposing any change. CI enforces them on Node 22.13 and 24, on
+Ubuntu and Windows.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict
+npm run test:run    # vitest, ~700 tests
 npm run build
 ```
 
-There is no test suite yet. Do not claim a change is "tested" — say what you verified and
-how.
+### Writing tests
+
+Tests live in `tests/`. Read `tests/unit/vault.test.ts` first — it is the reference for
+style and depth.
+
+- Suites that write rows call `freshDb()` in `beforeEach` and `dropDb(dir)` in `afterEach`
+  (`tests/helpers/db.ts`). No test may depend on execution order.
+- Stub the network with `stubUpstream()` from `tests/helpers/upstream.ts`, which replaces
+  global `fetch` — the boundary every adapter goes through. **Never let a request reach a
+  real provider.**
+- `tests/setup.ts` redirects the data directory before any import. Do not import
+  application modules above it.
+- Test the behaviour the code comments describe. Anything marked deliberate should have a
+  test that fails if it is "simplified" away.
 
 ## Layout
 

@@ -18,6 +18,7 @@ architecture from there.
 ```bash
 npm run dev          # dev server on :7272
 npm run typecheck    # tsc --noEmit — must be clean before any commit
+npm run test:run     # vitest, ~700 tests, must be green before any commit
 npm run build        # production build; CI runs this on 4 platform/version combos
 npm start            # serve the production build
 node bin/sb.mjs doctor   # diagnose a local install
@@ -107,13 +108,38 @@ and no other change — 13 of the 16 do. Template in
 tier ladder, the budget ceilings, and every figure in analytics. A guessed price silently
 corrupts all of them.
 
+## Tests
+
+```bash
+npm run test         # watch
+npm run test:run     # once
+npm run test:ci      # with coverage
+```
+
+~700 tests in `tests/`, on vitest. Structure:
+
+- `tests/setup.ts` repoints `SWITCHBOARD_DATA_DIR` at a temp directory **before any module
+  is imported**. This is load-bearing: the master key and the DB handle cache in module
+  scope on first use, so a test that imported the vault first would seal against the
+  developer's real key.
+- `tests/helpers/db.ts` — `freshDb()` per test, `dropDb()` after. Any suite that writes
+  rows must use them; tests must not depend on ordering.
+- `tests/helpers/upstream.ts` — stubs global `fetch`, which is where every adapter reaches
+  the network. The plan array is consumed one entry per upstream call, so
+  `[providerError(429), chatOk()]` describes a fallback. **Nothing in the suite may reach a
+  real provider.**
+
+Write tests against the behaviour the comments describe, not for line coverage. Every
+"deliberate" decision below has a test that fails if someone simplifies it away — that is
+what those tests are for.
+
 ## Before committing
 
 ```bash
-npm run typecheck && npm run build
+npm run typecheck && npm run test:run && npm run build
 ```
 
-Both are enforced in CI across Node 22.13/24 on Ubuntu and Windows. Windows is in the
+All three are enforced in CI across Node 22.13/24 on Ubuntu and Windows. Windows is in the
 matrix deliberately: storage is `node:sqlite` precisely so installs never need a native
 toolchain, and that claim is worth proving on every commit.
 
@@ -121,12 +147,17 @@ toolchain, and that claim is worth proving on every commit.
 
 Be honest about these rather than papering over them:
 
-- **Zero tests.** The single largest gap; an external audit scored coverage 0/10. CI
-  compiles and boots the gateway, which caught a real Node-version bug, but nothing tests
-  the router's scoring, the breaker's state machine, or the adapter translations.
+- **Coverage is uneven.** The routing core is well covered (score 100%, cost 100%, adapter
+  helpers 99%, candidates 95%), but the DB repositories, the management API routes and the
+  dashboard components have none. There are no component or end-to-end tests.
 - **Rate limiting is in-memory** (`src/lib/auth/rateLimit.ts`) and resets on restart.
 - **No structured logging** — `console.error` only, no redaction layer.
 - **`/v1/*` sends `Access-Control-Allow-Origin: *`**, which is fine for a loopback gateway
   and questionable the moment it is exposed.
+- **Failure latency samples skew the p50.** `breaker.ts` records failures as latency
+  samples and `recomputeLatency` does not filter on `ok`, so a provider failing fast can
+  look like the fastest candidate.
+- **`context_length` counts toward the breaker threshold**, unlike `bad_request`. A client
+  looping oversized prompts can open the breaker on a healthy connection.
 
 Roadmap for these lives in the audit documents the user maintains outside the repo.
