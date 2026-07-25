@@ -23,9 +23,9 @@ no account, no cloud control plane.
 
 ## Demo
 
-[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.1.0/brag.mp4)
+[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.2.0/brag.mp4)
 
-**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.1.0/brag.mp4)**
+**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.2.0/brag.mp4)**
 
 A provider 429s mid-request, the fallback lands on a different one, and the decision trace
 explains exactly why the replacement won. Every number on screen is real output from a
