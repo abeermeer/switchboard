@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { existsSync, accessSync, constants } from 'node:fs';
+import { existsSync, accessSync, constants, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -14,6 +14,15 @@ import { banner, dot, fail, info, money, ms, ok, table, warn } from './lib/rende
 import { resolveDataDir } from './lib/dataDir.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+function readPackageVersion() {
+  try {
+    const raw = readFileSync(join(root, 'package.json'), 'utf8');
+    return String(JSON.parse(raw).version ?? '0.0.0');
+  } catch {
+    return '0.0.0';
+  }
+}
 
 /**
  * Locate Next's CLI entry through node's own resolver.
@@ -34,12 +43,16 @@ function resolveNextBin() {
     process.exit(1);
   }
 }
+
 const program = new Command();
 
 program
   .name('sb')
   .description('Switchboard — a local-first AI gateway')
-  .version('0.1.0')
+  // Read from the manifest rather than hardcoded: a literal here silently
+  // drifts on every release, and `sb --version` reporting the wrong number is
+  // worse than useless when someone is diagnosing an upgrade.
+  .version(readPackageVersion())
   .option('--url <url>', 'gateway base URL', process.env.SWITCHBOARD_URL)
   .hook('preAction', (thisCommand) => {
     const url = thisCommand.opts().url;
