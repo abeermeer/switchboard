@@ -446,32 +446,39 @@ including the findings that are known and deliberately unfixed.
 
 ### Status
 
-Pre-1.0 and honest about it. An external audit put it at **7.2/10** — strong on
-architecture, resilience and type safety, with test coverage scored 0/10 as the single
-largest gap.
+Pre-1.0, and specific about what that means.
 
-That gap is now closed for the routing core: 709 tests covering scoring, cost settlement,
-candidate expansion, the breaker, the vault, the adapter error taxonomy, and the fallback
-walk end to end. Writing them surfaced a real bug — a non-ASCII character in a provider's
-error message crashed the response instead of returning the client's error, which any
-non-English upstream message would have triggered.
+An external audit put it at **7.2/10** — strong on architecture, resilience and type
+safety, with test coverage scored **0/10** as the single largest gap, alongside five
+smaller findings. All six are now closed:
 
-Since then the rest of the audit's findings have been closed too: CORS no longer wildcards
-`/v1`, rate limits persist across restarts, logging is structured with a tested redaction
-layer, the desktop build ships real icons, and a latency bug that made a broken provider
-look like the *fastest* candidate is fixed.
+| Finding | Resolution |
+| --- | --- |
+| No test suite | 852 tests; the routing core at 95–100% |
+| Rate limiting reset on restart | Persisted in SQLite |
+| `/v1` sent `Access-Control-Allow-Origin: *` | No CORS by default; explicit origin allowlist |
+| No structured logging | JSON logs with a tested redaction layer |
+| Desktop build shipped a stock icon | Icons generated from the product mark |
+| Failed requests skewed latency | Filtered to successes only |
 
-Still open, and worth knowing before you rely on it:
+Writing the tests found three real bugs that had survived every manual check: a non-ASCII
+character in a provider's error message crashed the response instead of returning the
+client's error; a rate limit of `0.5` bricked a key permanently; and a provider that was
+reliably *down* posted the fastest p50 in the fleet, so the `fastest` strategy actively
+preferred it.
+
+**Still open**, and worth knowing before you rely on it:
 
 - No tests for the DB repositories, the management API, or most dashboard pages, and no
   end-to-end tests.
 - No audit log of administrative actions.
-- No graceful shutdown — SIGTERM kills in-flight streams rather than draining them.
+- No graceful shutdown — `SIGTERM` kills in-flight streams rather than draining them.
 - `context_length` counts toward the circuit breaker, unlike `bad_request`, so a client
   looping oversized prompts can open the breaker on a healthy provider.
 
 **Do not run it exposed to the internet** without a reverse proxy and authentication in
-front. It is built for a machine you control.
+front. It is built for a machine you control. See [SECURITY.md](SECURITY.md) for the threat
+model.
 
 ---
 

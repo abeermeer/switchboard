@@ -28,7 +28,7 @@ Ubuntu and Windows.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict
-npm run test:run    # vitest, ~700 tests
+npm run test:run    # vitest, ~850 tests
 npm run build
 ```
 
@@ -44,6 +44,12 @@ style and depth.
   real provider.**
 - `tests/setup.ts` redirects the data directory before any import. Do not import
   application modules above it.
+- Component tests live in `tests/components/` and opt into a DOM with a
+  `@vitest-environment jsdom` docblock. Test through the accessible surface — role, name,
+  `aria-*` — so a test fails when a component becomes unusable, not when a class changes.
+- **Never import a server module from a jsdom test.** Pulling `node:sqlite` into a
+  browser-target bundle fails on Node 22.13 but passes on 24, so it goes green locally and
+  red in CI.
 - Test the behaviour the code comments describe. Anything marked deliberate should have a
   test that fails if it is "simplified" away.
 
@@ -92,8 +98,19 @@ Each of these fails silently or at build time rather than at typecheck:
 - An empty combo member chain means "every eligible connection".
 - The CLI pins `SWITCHBOARD_DATA_DIR` so a global install never stores data in
   `node_modules`.
+- `/v1` sends no `Access-Control-Allow-Origin` unless `SWITCHBOARD_CORS_ORIGINS` is set.
+- Response header values are sanitised to ASCII — they are ByteStrings, and a non-ASCII
+  provider error would otherwise throw inside `new Response`.
+- `recomputeLatency` counts successes only; a fast failure would otherwise make a broken
+  provider look like the fastest candidate.
 
 Each has a comment at the site explaining why. Read it before changing it.
+
+## Logging
+
+`src/lib/logger.ts` — JSON lines, child loggers, and a `redact()` pass over everything
+written. Never log a credential; if you extend the redaction rules, extend
+`tests/unit/logger.test.ts` with them.
 
 ## Adding a provider
 

@@ -2,6 +2,18 @@
 
 A running record of what was built, why, and what is still open. Newest first.
 
+## Releases
+
+| Version | What it was |
+| --- | --- |
+| **v0.3.0** | Closes every remaining audit finding. **Breaking:** `/v1` no longer sends a wildcard `Access-Control-Allow-Origin`, so a browser client must now list its origin in `SWITCHBOARD_CORS_ORIGINS`. Server-side SDK clients are unaffected. |
+| **v0.2.0** | The test suite (0 → 709), a working global install, and release automation. |
+| **v0.1.0** | First public release: the gateway, dashboard, CLI and desktop shell. |
+
+Releases are cut automatically by a version bump on `main` — see
+[README](README.md#releases). Never tag by hand; the workflow refuses to move an existing
+tag, so a manual one blocks the real release.
+
 ---
 
 ## 2026-07-25 (later) — Closing the audit's remaining findings
@@ -66,6 +78,27 @@ class changes), `LiveProvider`'s reconnection and escalating backoff against a c
 fake `EventSource`, and the policy editor's chain reordering.
 
 **Suite: 852 tests across 13 files.**
+
+### Also fixed in passing
+
+- **CI was green on Node 24 and red on 22.13.** The shared test setup imported the database
+  client unconditionally, so a jsdom file pulled `node:sqlite` into a browser-target bundle
+  — which Vite on 22.13 refuses to resolve, not yet recognising it as a builtin. Guarded on
+  `typeof window`; the suite also got about three times faster, because every node file had
+  been loading jsdom matchers it never used.
+- **`sb --version` reported the wrong number.** It was a hardcoded literal; now read from
+  the manifest.
+
+### Judgement calls worth revisiting
+
+- **The logger is hand-written rather than pino**, which the audit specifically
+  recommended. The redaction rules had to be written for this codebase either way, owning
+  them makes them exhaustively testable, and pino's worker-thread transports are a known
+  friction point under Next's bundler. Swapping to pino later is a contained change — every
+  call site goes through `src/lib/logger.ts`.
+- **CORS defaults to off rather than to an allowlist of localhost ports.** Anything running
+  in a browser against a fresh install has to set `SWITCHBOARD_CORS_ORIGINS` explicitly.
+  That is the safe default, but it is a default that will generate support questions.
 
 ---
 

@@ -18,7 +18,7 @@ architecture from there.
 ```bash
 npm run dev          # dev server on :7272
 npm run typecheck    # tsc --noEmit — must be clean before any commit
-npm run test:run     # vitest, ~700 tests, must be green before any commit
+npm run test:run     # vitest, ~850 tests, must be green before any commit
 npm run build        # production build; CI runs this on 4 platform/version combos
 npm start            # serve the production build
 node bin/sb.mjs doctor   # diagnose a local install
@@ -97,6 +97,20 @@ Do not "fix" these:
 - **The CLI pins `SWITCHBOARD_DATA_DIR` when it spawns the server.** Without it, a global
   install writes the database into `node_modules/switchboard/data`, and the next
   `npm update -g` deletes it along with every sealed credential.
+- **`/v1` sends no `Access-Control-Allow-Origin` unless one is configured.** The gateway is
+  for server-side SDK clients, which are unaffected by CORS; a wildcard would let any page
+  in the user's browser spend their provider credentials. Browser callers opt in through
+  `SWITCHBOARD_CORS_ORIGINS`.
+- **Header values are sanitised to ASCII** (`headerSafe` in `src/lib/api/handler.ts`).
+  Header values are ByteStrings, so a code point above 255 throws inside `new Response` and
+  turns a handled upstream failure into an unhandled 500. Provider errors carry non-English
+  text routinely.
+- **`recomputeLatency` filters on `ok = 1`.** Failures are recorded as latency samples too,
+  and a refused connection returns in milliseconds — counting them made a broken provider
+  post the fleet's best p50, which the `fastest` strategy then preferred.
+- **Rate limiting counts hits per second, not per request.** A key at 10k requests/minute
+  writes 60 rows per window instead of 10,000. That is what makes persisting it cheap
+  enough for the hot path.
 
 ## Adding a provider
 
@@ -136,6 +150,24 @@ npm run test:ci      # with coverage
 Write tests against the behaviour the comments describe, not for line coverage. Every
 "deliberate" decision below has a test that fails if someone simplifies it away — that is
 what those tests are for.
+
+**Do not import server modules from a jsdom test file.** `tests/setup.ts` guards its
+database import on `typeof window` because a jsdom file pulling in `node:sqlite` drags a
+Node builtin into a browser-target bundle, which Vite on Node 22.13 refuses to resolve.
+That failure appears only on 22.13, so it passes locally on 24 and fails in CI.
+
+## Logging
+
+`src/lib/logger.ts`. One JSON object per line, pretty in a TTY, child loggers via
+`requestLogger({ requestId })`.
+
+Everything logged goes through `redact()` first — by key name (`authorization`, `api_key`,
+`token`, …) and by value shape, so a credential pasted into free text is caught too. That
+function is the security-critical part of the module; if you extend it, extend
+`tests/unit/logger.test.ts` with it.
+
+Tests run with `SWITCHBOARD_LOG_LEVEL=silent` because the suite trips breaker transitions
+dozens of times on purpose.
 
 ## Commits
 
