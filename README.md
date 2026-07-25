@@ -117,7 +117,7 @@ docker run -d -p 7272:7272 -v switchboard-data:/data switchboard
 **Pin to a release line** — every version is branched, so you can track one:
 
 ```bash
-npm install -g switchboard@0.1.0
+npm install -g switchboard@0.2.0
 ```
 
 </details>
