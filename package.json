@@ -53,6 +53,7 @@
     "test:ci": "vitest run --coverage",
     "prepublishOnly": "npm run typecheck && npm run test:run && npm run build",
     "pack:check": "npm pack --dry-run",
+    "icons": "node scripts/make-icons.mjs",
     "electron:dev": "concurrently -k -n next,electron \"npm:dev\" \"wait-on tcp:7272 && cross-env SWITCHBOARD_DEV=1 electron electron/main.cjs\"",
     "electron:build": "npm run build && electron-builder --config electron/builder.config.cjs",
     "electron:build:win": "npm run build && electron-builder --win --config electron/builder.config.cjs"
@@ -79,6 +80,7 @@
     "cross-env": "^10.1.0",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
+    "sharp": "^0.35.3",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vitest": "^4.1.10",

@@ -173,8 +173,14 @@ export function recomputeLatency(connectionId: string): { p50: number | null; p9
   const rows = asRows(
     getDb()
       .prepare(
+        // `ok = 1` is load-bearing, not a tidy-up. Failures are recorded as
+        // samples too, and a connection-refused or an instant 401 returns in a
+        // few milliseconds — so without this filter a completely broken
+        // provider posts the fastest p50 in the fleet, and the `fastest`
+        // strategy actively prefers it. Latency means "how quickly it served a
+        // request", which only successes can answer.
         `SELECT ttft_ms, total_ms FROM latency_samples
-         WHERE connection_id = ? AND ts >= ?
+         WHERE connection_id = ? AND ts >= ? AND ok = 1
          ORDER BY ts DESC
          LIMIT ?`,
       )

@@ -707,6 +707,38 @@ describe('resilience/breaker', () => {
       expect(snap.p95LatencyMs).toBe(30);
     });
 
+    it('ignores failed requests when computing latency', () => {
+      // Regression: failures are recorded as samples too, and they return fast
+      // — a refused connection or an instant 401 takes single-digit
+      // milliseconds. Counting them made a broken provider post the best p50 in
+      // the fleet, so the `fastest` strategy actively preferred whatever was
+      // most reliably down.
+      onSuccess(connectionId, MODEL, 400, 400);
+      onSuccess(connectionId, MODEL, 400, 400);
+      onSuccess(connectionId, MODEL, 400, 400);
+      expect(snapshot(connectionId).p50LatencyMs).toBe(400);
+
+      // Twenty instant failures must not drag the measured latency down.
+      for (let i = 0; i < 20; i += 1) {
+        onFailure(connectionId, MODEL, failure('server'), 3);
+      }
+
+      expect(snapshot(connectionId).p50LatencyMs).toBe(400);
+    });
+
+    it('reports no latency at all for a connection that has only ever failed', () => {
+      // Null is the honest answer: nothing has successfully served a request,
+      // so there is no latency to report. Scoring treats an unmeasured
+      // candidate as mid-pack rather than fastest.
+      for (let i = 0; i < 10; i += 1) {
+        onFailure(connectionId, MODEL, failure('network'), 2);
+      }
+
+      const snap = snapshot(connectionId);
+      expect(snap.p50LatencyMs).toBeNull();
+      expect(snap.p95LatencyMs).toBeNull();
+    });
+
     it('exposes the open window so the dashboard can count down', () => {
       vi.spyOn(Math, 'random').mockReturnValue(0.5);
       updateSettings({ breakerFailureThreshold: 1, breakerCooldownMs: 20_000 });

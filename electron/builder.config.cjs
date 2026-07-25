@@ -3,9 +3,10 @@
 /**
  * electron-builder configuration.
  *
- * Icons belong at electron/assets/icon.{ico,icns,png}. The build works without
- * them — electron-builder falls back to the stock Electron icon — so a missing
- * asset is a cosmetic issue, not a failure.
+ * Icons live at electron/assets/ and are generated from the product mark by
+ * `npm run icons` (scripts/make-icons.mjs) rather than checked in as opaque
+ * binaries, so they cannot drift from the sidebar glyph they are drawn from.
+ * Regenerate after changing the accent tokens in globals.css.
  */
 module.exports = {
   appId: 'com.abeermeer.switchboard',
