@@ -10,10 +10,14 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'node',
     globals: false,
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     setupFiles: ['./tests/setup.ts'],
+
+    // Node by default — most of the suite is the gateway, and jsdom would only
+    // slow it down. Component tests opt into a DOM per file with the
+    // `@vitest-environment jsdom` docblock.
+    environment: 'node',
 
     // Every test file gets its own process, and therefore its own SQLite handle
     // and its own module-scope caches (the master key, the db handle, the rate

@@ -47,4 +47,14 @@ afterAll(async () => {
   }
 });
 
+// DOM matchers (toBeDisabled, toBeVisible, …) for the component tests. Loaded
+// lazily so the node-environment suites do not pay for a jsdom-only import.
+if (process.env.VITEST_ENV_JSDOM !== '0') {
+  try {
+    await import('@testing-library/jest-dom/vitest');
+  } catch {
+    // Node-environment files import fine without it; only .tsx suites need it.
+  }
+}
+
 export const TEST_DATA_DIR = root;
