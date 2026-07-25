@@ -36,9 +36,18 @@ beforeAll(() => {
   process.env.SWITCHBOARD_DATA_DIR = root;
 });
 
+/** jsdom defines `window`; the node-environment suites do not. */
+const IS_DOM = typeof window !== 'undefined';
+
 afterAll(async () => {
-  const { closeDb } = await import('@/lib/db/client');
-  closeDb();
+  // Only the node suites ever open a database, and importing the client from a
+  // jsdom file would drag `node:sqlite` into a browser-target bundle — which
+  // Vite refuses to do on Node 22.13, where it is not yet a recognised builtin.
+  if (!IS_DOM) {
+    const { closeDb } = await import('@/lib/db/client');
+    closeDb();
+  }
+
   try {
     rmSync(root, { recursive: true, force: true });
   } catch {
@@ -47,14 +56,10 @@ afterAll(async () => {
   }
 });
 
-// DOM matchers (toBeDisabled, toBeVisible, …) for the component tests. Loaded
-// lazily so the node-environment suites do not pay for a jsdom-only import.
-if (process.env.VITEST_ENV_JSDOM !== '0') {
-  try {
-    await import('@testing-library/jest-dom/vitest');
-  } catch {
-    // Node-environment files import fine without it; only .tsx suites need it.
-  }
+// DOM matchers (toBeDisabled, toBeVisible, …) for the component tests. Only
+// loaded where there is a DOM to match against.
+if (typeof window !== 'undefined') {
+  await import('@testing-library/jest-dom/vitest');
 }
 
 export const TEST_DATA_DIR = root;

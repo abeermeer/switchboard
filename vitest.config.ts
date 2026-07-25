@@ -2,6 +2,13 @@ import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
+  // Node 22.13 predates Vite's recognition of `node:sqlite` as a builtin, so a
+  // client-target bundle that touches it fails to resolve. Marking it external
+  // keeps the behaviour identical across the supported Node range instead of
+  // passing on 24 and failing on 22.13.
+  optimizeDeps: { exclude: ['node:sqlite'] },
+  ssr: { external: ['node:sqlite'] },
+
   resolve: {
     // Mirrors the `@/*` path alias in tsconfig. Set here rather than pulling in
     // vite-tsconfig-paths: one alias does not justify another dependency.
