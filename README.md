@@ -24,9 +24,9 @@ no account, no cloud control plane.
 
 ## Demo
 
-[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.2.0/brag.mp4)
+[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.3.0/brag.mp4)
 
-**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.2.0/brag.mp4)**
+**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.3.0/brag.mp4)**
 
 A provider 429s mid-request, the fallback lands on a different one, and the decision trace
 explains exactly why the replacement won. Every number on screen is real output from a
@@ -132,7 +132,7 @@ docker run -d -p 7272:7272 -v switchboard-data:/data switchboard
 **Pin to a release line** — every version is branched, so you can track one:
 
 ```bash
-npm install -g switchboard@0.2.0
+npm install -g switchboard@0.3.0
 ```
 
 </details>
