@@ -4,6 +4,71 @@ A running record of what was built, why, and what is still open. Newest first.
 
 ---
 
+## 2026-07-25 (later) — Closing the audit's remaining findings
+
+An external audit listed six remaining gaps. All six were verified against the code — every
+one was accurate — and all six are now closed.
+
+### Latency samples skewed the router (a real routing bug)
+
+`recomputeLatency` selected every sample in the window regardless of outcome, and failures
+are recorded as samples too. A refused connection or an instant 401 returns in single-digit
+milliseconds, so **a provider that was reliably down posted the best p50 in the fleet** —
+and the `fastest` strategy then actively preferred it. The query now filters on `ok = 1`.
+Two regression tests, including one asserting that a connection which has only ever failed
+reports `null` rather than "instant".
+
+### Structured logging with redaction
+
+Three bare `console.error` calls were the whole observability story. Logs are now one JSON
+object per line (pretty in a TTY), with child loggers stamping a `requestId` across a
+request. Covered events: a breaker opening or closing, a model lockout and whether the
+provider supplied the duration or we guessed, a routing failure with per-attempt reasons,
+and a successful fallback — the client saw a 200 there, so the log is the only place the
+recovery is visible.
+
+Written rather than pulling in pino, deliberately: the redaction rules had to be written
+for this codebase either way, and owning them means they can be tested exhaustively. 52
+tests cover every secret-ish key name, five providers' credential formats hiding under
+innocent keys, nested structures, error messages, and the regex `lastIndex` reset that
+would otherwise make every other call silently miss.
+
+### CORS wildcard closed
+
+`/v1` sent `Access-Control-Allow-Origin: *` to everyone. The gateway holds every provider
+credential the user owns, so that handed any page in their browser the ability to spend
+them once it learned a key. The default is now no CORS at all — the endpoint is for
+server-side SDK clients, which are unaffected by it — and a browser app opts in by listing
+origins, which are reflected rather than wildcarded, with `Vary: Origin`.
+
+### Rate limiting persisted
+
+In memory, a restart handed every key a fresh allowance: a crash-looping client or an
+operator restarting to apply a setting silently lifted the cap. Now in SQLite (migration 2),
+counting hits per second rather than per request, so a key doing 10k/minute writes 60 rows
+in a window instead of 10,000.
+
+Fixed a real bug while in there: the guard ran *before* the floor, so `rateLimitPerMin: 0.5`
+passed a `> 0` check, floored to 0, and refused every request forever — a blocked call
+records no hit, so nothing aged out and the key could never recover.
+
+### Electron icons
+
+`electron/assets/` did not exist, so every desktop installer shipped with the stock Electron
+logo. Icons are now generated from the same patch-panel mark the sidebar draws
+(`npm run icons`), as code rather than checked-in binaries so they cannot drift from the UI.
+
+### Component tests
+
+43 components had none. Added tests for the UI primitives (through their accessible surface
+— role, name, `aria-*` — so they fail when a component becomes unusable rather than when a
+class changes), `LiveProvider`'s reconnection and escalating backoff against a controllable
+fake `EventSource`, and the policy editor's chain reordering.
+
+**Suite: 852 tests across 13 files.**
+
+---
+
 ## 2026-07-25 — Test suite, global install, release automation
 
 **Shipped:** `v0.2.0`, public at <https://github.com/abeermeer/switchboard>.
@@ -90,14 +155,11 @@ calls, not clear bugs:
 
 1. **`context_length` counts toward the breaker threshold**, unlike `bad_request`. A
    client looping oversized prompts can open the breaker on a healthy connection.
-2. **Failure latency samples skew the p50.** `recomputeLatency` does not filter on `ok`,
-   so a provider failing fast (~5 ms connection refused) can look like the *fastest*
-   candidate to a latency-weighted strategy.
+   *(Still open.)*
+2. ~~**Failure latency samples skew the p50.**~~ *Fixed later the same day — see above.*
 3. **A half-open trial that gets a 429 never reports back** — the trial slot stays held
-   until its window expires.
-4. **`rateLimitPerMin: 0.5` bricks a key permanently.** It floors to 0, blocks everything,
-   and a blocked call records no hit, so it never recovers. Unreachable through
-   `updateApiKey` (it truncates), reachable through `createApiKey`.
+   until its window expires. *(Still open.)*
+4. ~~**`rateLimitPerMin: 0.5` bricks a key permanently.**~~ *Fixed later the same day.*
 
 ---
 

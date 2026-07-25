@@ -1,7 +1,7 @@
 # Switchboard
 
 [![CI](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-709-3ecf8e.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-852-3ecf8e.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.13-f0912f.svg)](https://nodejs.org)
 
@@ -319,11 +319,41 @@ Everything is optional; sane defaults are generated on first run.
 | `SWITCHBOARD_DATA_DIR` | `./data` | Database, key vault, logs |
 | `SWITCHBOARD_MASTER_KEY` | generated | Base64 32-byte key for credential encryption |
 | `SWITCHBOARD_ALLOW_REMOTE` | `0` | Allow non-loopback dashboard access |
+| `SWITCHBOARD_CORS_ORIGINS` | *(none)* | Origins allowed to call `/v1` from a browser |
+| `SWITCHBOARD_LOG_LEVEL` | `info` / `debug` | `debug` · `info` · `warn` · `error` · `silent` |
+| `SWITCHBOARD_LOG_FORMAT` | auto | `json`, or `pretty` in a TTY |
 | `SWITCHBOARD_PACKAGED` | `0` | Set by the desktop build |
 
 Provider credentials are sealed with **AES-256-GCM** before they touch disk. The master key
 lives in `<data-dir>/master.key` with `0600` permissions. No endpoint returns a stored
 credential — only a four-character hint.
+
+### CORS
+
+`/v1` sends **no** `Access-Control-Allow-Origin` by default. The endpoint is built for
+server-side SDK clients, which send no `Origin` header and are unaffected by CORS — while a
+wildcard would let any page you happen to visit spend your provider credentials the moment
+it learned a key.
+
+If a browser app calls the gateway directly, list its origins:
+
+```bash
+SWITCHBOARD_CORS_ORIGINS=http://localhost:3000,https://myapp.example
+```
+
+Allowed origins are reflected rather than wildcarded, with `Vary: Origin` so a shared cache
+cannot hand one origin's response to another. `*` still works if you want the old
+behaviour, but it is now a decision rather than a default.
+
+### Logging
+
+One JSON object per line on stdout, or a human-readable line in a TTY. Values that look
+like credentials are redacted before anything is written — by key name (`authorization`,
+`api_key`, `token`, …) and by shape, so a key pasted into free text is caught too.
+
+```bash
+switchboard 2>&1 | jq 'select(.level == "warn")'
+```
 
 ---
 
@@ -383,16 +413,19 @@ contribution workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 ### Tests
 
 ```bash
-npm run test:run     # ~700 tests
+npm run test:run     # ~850 tests
 npm run test:ci      # with coverage
 ```
 
 Vitest, running on every CI leg. The suite covers the parts where a silent bug costs money
-or loses a request: the scoring model (100%), cost and free-tier settlement (100%), the
-adapter helpers that classify every upstream error (99%), candidate expansion and exclusion
-(95%), the circuit breaker's full state machine, the credential vault, and an integration
-layer that drives the real route handlers against a stubbed provider — including the
-fallback walk itself.
+or loses a request: the scoring model (100%), cost and free-tier settlement (100%), rate
+limiting (100%), the adapter helpers that classify every upstream error (99%), candidate
+expansion and exclusion (95%), the circuit breaker's full state machine, the credential
+vault and its redaction layer, and an integration layer that drives the real route handlers
+against a stubbed provider — including the fallback walk itself.
+
+There are component tests too, for the UI primitives, the live-event transport's
+reconnection and backoff, and the policy editor's chain reordering.
 
 Tests assert the behaviour the code's comments claim, so the deliberate decisions
 (`bad_request` never retries, a started stream is never retried, free tiers settle at $0)
@@ -423,13 +456,19 @@ walk end to end. Writing them surfaced a real bug — a non-ASCII character in a
 error message crashed the response instead of returning the client's error, which any
 non-English upstream message would have triggered.
 
+Since then the rest of the audit's findings have been closed too: CORS no longer wildcards
+`/v1`, rate limits persist across restarts, logging is structured with a tested redaction
+layer, the desktop build ships real icons, and a latency bug that made a broken provider
+look like the *fastest* candidate is fixed.
+
 Still open, and worth knowing before you rely on it:
 
-- No tests for the DB repositories, the management API, or the dashboard.
-- Rate limiting is in-memory and resets on restart.
-- No structured logging — `console.error` only, with no redaction layer.
-- `/v1/*` sends `Access-Control-Allow-Origin: *`, which is fine on loopback and
-  questionable the moment it is exposed.
+- No tests for the DB repositories, the management API, or most dashboard pages, and no
+  end-to-end tests.
+- No audit log of administrative actions.
+- No graceful shutdown — SIGTERM kills in-flight streams rather than draining them.
+- `context_length` counts toward the circuit breaker, unlike `bad_request`, so a client
+  looping oversized prompts can open the breaker on a healthy provider.
 
 **Do not run it exposed to the internet** without a reverse proxy and authentication in
 front. It is built for a machine you control.

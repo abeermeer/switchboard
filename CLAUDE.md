@@ -116,7 +116,7 @@ npm run test:run     # once
 npm run test:ci      # with coverage
 ```
 
-~700 tests in `tests/`, on vitest. Structure:
+~850 tests in `tests/`, on vitest. Structure:
 
 - `tests/setup.ts` repoints `SWITCHBOARD_DATA_DIR` at a temp directory **before any module
   is imported**. This is load-bearing: the master key and the DB handle cache in module
@@ -128,6 +128,10 @@ npm run test:ci      # with coverage
   the network. The plan array is consumed one entry per upstream call, so
   `[providerError(429), chatOk()]` describes a fallback. **Nothing in the suite may reach a
   real provider.**
+- `tests/components/*.test.tsx` — opt into a DOM with a `@vitest-environment jsdom`
+  docblock at the top of the file. Test through the accessible surface (role, name,
+  `aria-*`) rather than markup, so a test fails when the component becomes unusable rather
+  than when a class name changes.
 
 Write tests against the behaviour the comments describe, not for line coverage. Every
 "deliberate" decision below has a test that fails if someone simplifies it away — that is
@@ -157,22 +161,16 @@ toolchain, and that claim is worth proving on every commit.
 Be honest about these rather than papering over them:
 
 - **Coverage is uneven.** The routing core is well covered (score 100%, cost 100%, adapter
-  helpers 99%, candidates 95%), but the DB repositories, the management API routes and the
-  dashboard components have none. There are no component or end-to-end tests.
-- **Rate limiting is in-memory** (`src/lib/auth/rateLimit.ts`) and resets on restart.
-- **No structured logging** — `console.error` only, no redaction layer.
-- **`/v1/*` sends `Access-Control-Allow-Origin: *`**, which is fine for a loopback gateway
-  and questionable the moment it is exposed.
-- **Failure latency samples skew the p50.** `breaker.ts` records failures as latency
-  samples and `recomputeLatency` does not filter on `ok`, so a provider failing fast can
-  look like the fastest candidate.
+  helpers 99%, candidates 95%, rate limit 100%), and there are component tests for the UI
+  primitives, `LiveProvider` and the policy editor. The DB repositories, the management API
+  routes and most dashboard pages have none, and there are no end-to-end tests.
 - **`context_length` counts toward the breaker threshold**, unlike `bad_request`. A client
   looping oversized prompts can open the breaker on a healthy connection.
 - **A half-open trial that gets a 429 never reports back** — the trial slot stays held
   until its window expires.
-- **`rateLimitPerMin: 0.5` bricks a key** — it floors to 0, blocks everything, and a
-  blocked call records no hit so it never recovers. Unreachable via `updateApiKey`, which
-  truncates; reachable via `createApiKey`.
+- **No audit log of admin actions** — key creation, connection changes and token rotation
+  are not recorded anywhere.
+- **No graceful shutdown** — SIGTERM kills in-flight streams rather than draining them.
 
 [SESSION_SUMMARY.md](SESSION_SUMMARY.md) records what changed in each session and why.
 Roadmap for the gaps lives in the audit documents the user maintains outside the repo.
