@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { POST as chatPost } from '@/app/v1/chat/completions/route';
+import { OPTIONS as chatOptions, POST as chatPost } from '@/app/v1/chat/completions/route';
 import { GET as modelsGet } from '@/app/v1/models/route';
 import { POST as bootstrapPost } from '@/app/api/system/bootstrap/route';
 import { createConnection } from '@/lib/db/repos/connections';
@@ -433,6 +433,98 @@ describe('gateway integration', () => {
 
       const { rows } = listRequestLogs({ limit: 1 });
       expect(rows[0]?.apiKeyId).toBe(key.id);
+    });
+  });
+
+  // ── CORS ──────────────────────────────────────────────────────────────────
+
+  describe('CORS', () => {
+    const BROWSER = { origin: 'https://app.example' };
+
+    beforeEach(() => {
+      seedConnections();
+      delete process.env.SWITCHBOARD_CORS_ORIGINS;
+    });
+
+    afterEach(() => {
+      delete process.env.SWITCHBOARD_CORS_ORIGINS;
+    });
+
+    it('sends no allow-origin by default', async () => {
+      // The gateway holds every provider credential the user owns. A wildcard
+      // would let any page in their browser spend those the moment it learned a
+      // key, so a browser has to be allowed in explicitly.
+      const res = await chatOptions(new Request(CHAT_URL, { method: 'OPTIONS', headers: BROWSER }));
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('reflects an origin the operator allowed', async () => {
+      process.env.SWITCHBOARD_CORS_ORIGINS = 'https://app.example';
+
+      const res = await chatOptions(new Request(CHAT_URL, { method: 'OPTIONS', headers: BROWSER }));
+      expect(res.headers.get('access-control-allow-origin')).toBe('https://app.example');
+      // Without Vary, a shared cache could hand one origin's response to
+      // another and defeat the allowlist.
+      expect(res.headers.get('vary')).toBe('Origin');
+    });
+
+    it('refuses an origin that is not on the list', async () => {
+      process.env.SWITCHBOARD_CORS_ORIGINS = 'https://app.example';
+
+      const res = await chatOptions(
+        new Request(CHAT_URL, { method: 'OPTIONS', headers: { origin: 'https://evil.example' } }),
+      );
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('honours several allowed origins', async () => {
+      process.env.SWITCHBOARD_CORS_ORIGINS = 'http://localhost:3000, https://app.example';
+
+      const local = await chatOptions(
+        new Request(CHAT_URL, { method: 'OPTIONS', headers: { origin: 'http://localhost:3000' } }),
+      );
+      expect(local.headers.get('access-control-allow-origin')).toBe('http://localhost:3000');
+
+      const remote = await chatOptions(new Request(CHAT_URL, { method: 'OPTIONS', headers: BROWSER }));
+      expect(remote.headers.get('access-control-allow-origin')).toBe('https://app.example');
+    });
+
+    it('still supports an explicit wildcard for anyone who wants the old behaviour', async () => {
+      process.env.SWITCHBOARD_CORS_ORIGINS = '*';
+
+      const res = await chatOptions(new Request(CHAT_URL, { method: 'OPTIONS', headers: BROWSER }));
+      expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    });
+
+    it('ignores a trailing slash on either side', async () => {
+      process.env.SWITCHBOARD_CORS_ORIGINS = 'https://app.example/';
+
+      const res = await chatOptions(new Request(CHAT_URL, { method: 'OPTIONS', headers: BROWSER }));
+      expect(res.headers.get('access-control-allow-origin')).toBe('https://app.example');
+    });
+
+    it('carries the allow-origin on a real response, not just the preflight', async () => {
+      process.env.SWITCHBOARD_CORS_ORIGINS = 'https://app.example';
+      upstream = stubUpstream([chatOk()]);
+
+      const res = await chatPost(jsonRequest(CHAT_URL, HELLO, BROWSER));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBe('https://app.example');
+    });
+
+    it('carries it on an error too, so the browser can read what went wrong', async () => {
+      process.env.SWITCHBOARD_CORS_ORIGINS = 'https://app.example';
+      upstream = stubUpstream([chatOk()]);
+
+      const res = await chatPost(jsonRequest(CHAT_URL, { model: 'auto' }, BROWSER));
+      expect(res.status).toBe(400);
+      expect(res.headers.get('access-control-allow-origin')).toBe('https://app.example');
+    });
+
+    it('always answers the preflight, allowed or not', async () => {
+      const res = await chatOptions(new Request(CHAT_URL, { method: 'OPTIONS' }));
+      expect(res.status).toBe(204);
+      expect(res.headers.get('access-control-allow-methods')).toContain('POST');
     });
   });
 

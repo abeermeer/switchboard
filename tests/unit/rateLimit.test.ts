@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { checkRateLimit, clearRateLimit, rateLimitUsage } from '@/lib/auth/rateLimit';
+import { closeDb } from '@/lib/db/client';
 
 /** A fixed instant, so every window calculation below is exact rather than approximate. */
 const T0 = Date.UTC(2026, 2, 14, 9, 0, 0);
@@ -9,9 +10,9 @@ const WINDOW_MS = 60_000;
 
 describe('auth/rateLimit', () => {
   beforeEach(() => {
-    // The store is parked on globalThis so it survives Next's HMR re-evaluation
-    // in dev. That also means it survives between tests, so every case starts by
-    // forgetting everything — otherwise the suite would depend on file order.
+    // State is persisted now, so it outlives the process as well as the test.
+    // Every case starts by forgetting everything, otherwise the suite would
+    // depend on file order.
     clearRateLimit();
   });
 
@@ -83,13 +84,16 @@ describe('auth/rateLimit', () => {
       expect(checkRateLimit('key-almost-two', 1.999).allowed).toBe(false);
     });
 
-    it('blocks every call for a fractional limit below 1, which floors to zero', () => {
-      // 0.5 passes the `perMinute > 0` guard and then floors to a limit of 0, so
-      // the key is refused with no way to recover. Unreachable through
-      // updateApiKey (which truncates to an integer first, turning 0.5 into 0 →
-      // unlimited), but pinned here so the inconsistency cannot change silently.
-      expect(checkRateLimit('key-sub-one', 0.5).allowed).toBe(false);
-      expect(checkRateLimit('key-sub-one', 0.5).allowed).toBe(false);
+    it('treats a fractional limit below 1 as unlimited rather than bricking the key', () => {
+      // Regression: the guard used to run before the floor, so 0.5 passed a
+      // `> 0` check and then floored to a limit of 0 — refusing every call. And
+      // because a blocked call records no hit, nothing ever aged out of the
+      // window, so the key could never recover. A nonsensical limit must fail
+      // open, exactly like a blank field.
+      for (let i = 0; i < 5; i += 1) {
+        expect(checkRateLimit('key-sub-one', 0.5).allowed).toBe(true);
+      }
+      expect(checkRateLimit('key-sub-one', 0.999).allowed).toBe(true);
     });
 
     it('reports a retryAfterSec of at least 1 on a block, never 0', () => {
@@ -135,6 +139,34 @@ describe('auth/rateLimit', () => {
       checkRateLimit('key-grow', 1);
       expect(checkRateLimit('key-grow', 1).allowed).toBe(false);
       expect(checkRateLimit('key-grow', 3).allowed).toBe(true);
+    });
+  });
+
+  describe('durability', () => {
+    it('survives a restart', () => {
+      // The whole reason this moved out of memory. A limiter that forgets on
+      // restart means a crash-looping client, or an operator restarting to
+      // apply a setting, silently lifts the cap.
+      checkRateLimit('key-restart', 2);
+      checkRateLimit('key-restart', 2);
+      expect(checkRateLimit('key-restart', 2).allowed).toBe(false);
+
+      // Drop the handle and every module-scope cache with it; the next call
+      // reopens the database from disk.
+      closeDb();
+
+      expect(checkRateLimit('key-restart', 2).allowed).toBe(false);
+      expect(rateLimitUsage('key-restart')).toBe(2);
+    });
+
+    it('counts a burst within one second as separate hits', () => {
+      // Rows are keyed by second to keep the write volume sane, so the counter
+      // has to increment within a second rather than collapsing to one row.
+      vi.useFakeTimers();
+      vi.setSystemTime(T0);
+
+      for (let i = 0; i < 5; i += 1) checkRateLimit('key-burst', 10);
+      expect(rateLimitUsage('key-burst')).toBe(5);
     });
   });
 

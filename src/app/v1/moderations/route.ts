@@ -9,6 +9,6 @@ export async function POST(req: Request): Promise<Response> {
   return handleModality(req, 'moderation', moderationSchema);
 }
 
-export function OPTIONS(): Response {
-  return preflight();
+export function OPTIONS(req: Request): Response {
+  return preflight(req);
 }

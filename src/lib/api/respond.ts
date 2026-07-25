@@ -2,32 +2,95 @@ import type { ApiKey } from '@/types/core';
 import { listApiKeys, touchApiKey, verifyApiKey } from '@/lib/db/repos/apiKeys';
 import { checkRateLimit } from '@/lib/auth/rateLimit';
 
-export const CORS_HEADERS: Record<string, string> = {
-  'access-control-allow-origin': '*',
+const CORS_BASE: Record<string, string> = {
   'access-control-allow-headers': 'authorization, content-type, x-api-key, openai-organization',
   'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
   'access-control-max-age': '86400',
 };
 
-/** The OpenAI error envelope, byte for byte — clients parse this shape. */
+/**
+ * Origins allowed to call `/v1` from a browser.
+ *
+ * `*` was the old default and it was the wrong one. The gateway holds every
+ * provider credential the user owns, and a wildcard means any page in that
+ * browser can spend them the moment it learns a key — the same-origin policy
+ * being the only thing that would otherwise have stopped it.
+ *
+ * The endpoint is designed for server-side SDK clients, which do not send an
+ * `Origin` header and are unaffected by CORS at all. So the default is now no
+ * CORS, and a browser app opts in explicitly:
+ *
+ *     SWITCHBOARD_CORS_ORIGINS=http://localhost:3000,https://myapp.example
+ *     SWITCHBOARD_CORS_ORIGINS=*        (the old behaviour, if you want it)
+ */
+function allowedOrigins(): string[] {
+  const raw = process.env.SWITCHBOARD_CORS_ORIGINS?.trim();
+  if (raw === undefined || raw.length === 0) return [];
+  return raw
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/$/, ''))
+    .filter((origin) => origin.length > 0);
+}
+
+/**
+ * Reflects the caller's origin when it is allowed, rather than echoing `*`.
+ * Reflection is required for a credentialed request and is what lets several
+ * distinct origins be permitted without widening the policy to everyone.
+ */
+export function corsHeaders(req?: Request): Record<string, string> {
+  const allowed = allowedOrigins();
+  if (allowed.length === 0) return { ...CORS_BASE };
+
+  if (allowed.includes('*')) {
+    return { ...CORS_BASE, 'access-control-allow-origin': '*' };
+  }
+
+  const origin = req?.headers.get('origin')?.replace(/\/$/, '');
+  if (origin !== undefined && origin !== null && allowed.includes(origin)) {
+    return {
+      ...CORS_BASE,
+      'access-control-allow-origin': origin,
+      // Without this a shared cache could hand one origin's response to
+      // another, defeating the allowlist.
+      vary: 'Origin',
+    };
+  }
+
+  return { ...CORS_BASE, vary: 'Origin' };
+}
+
+/**
+ * Static header set for paths that do not have the request in hand.
+ * Prefer `corsHeaders(req)`; this exists so older call sites keep compiling.
+ */
+export const CORS_HEADERS: Record<string, string> = CORS_BASE;
+
+/**
+ * The OpenAI error envelope, byte for byte — clients parse this shape.
+ *
+ * `req` is optional but worth passing: without it an allowed browser origin
+ * gets the error status but cannot read the body explaining it, because the
+ * response carries no `Access-Control-Allow-Origin`.
+ */
 export function jsonError(
   status: number,
   message: string,
   type = 'invalid_request_error',
   code: string | null = null,
   extraHeaders: Record<string, string> = {},
+  req?: Request,
 ): Response {
   return new Response(
     JSON.stringify({ error: { message, type, param: null, code } }),
     {
       status,
-      headers: { 'content-type': 'application/json', ...CORS_HEADERS, ...extraHeaders },
+      headers: { 'content-type': 'application/json', ...corsHeaders(req), ...extraHeaders },
     },
   );
 }
 
-export function preflight(): Response {
-  return new Response(null, { status: 204, headers: CORS_HEADERS });
+export function preflight(req?: Request): Response {
+  return new Response(null, { status: 204, headers: corsHeaders(req) });
 }
 
 export interface AuthResult {
@@ -67,6 +130,8 @@ export function authenticate(req: Request): AuthResult {
         'Missing API key. Pass it as "Authorization: Bearer sb-live-...".',
         'authentication_error',
         'missing_api_key',
+        {},
+        req,
       ),
     };
   }
@@ -75,7 +140,7 @@ export function authenticate(req: Request): AuthResult {
   if (key === null) {
     return {
       key: null,
-      error: jsonError(401, 'Invalid API key.', 'authentication_error', 'invalid_api_key'),
+      error: jsonError(401, 'Invalid API key.', 'authentication_error', 'invalid_api_key', {}, req),
     };
   }
 
@@ -89,6 +154,7 @@ export function authenticate(req: Request): AuthResult {
         'rate_limit_error',
         'rate_limit_exceeded',
         { 'retry-after': String(limit.retryAfterSec) },
+        req,
       ),
     };
   }

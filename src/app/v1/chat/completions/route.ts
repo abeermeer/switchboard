@@ -50,6 +50,6 @@ export async function POST(req: Request): Promise<Response> {
   return handleModality(req, 'chat', chatSchema, { deriveFeatures });
 }
 
-export function OPTIONS(): Response {
-  return preflight();
+export function OPTIONS(req: Request): Response {
+  return preflight(req);
 }

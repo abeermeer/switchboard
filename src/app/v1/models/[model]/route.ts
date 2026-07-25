@@ -1,5 +1,5 @@
 import { listAvailableModels } from '@/lib/router';
-import { authenticate, CORS_HEADERS, jsonError, preflight } from '@/lib/api/respond';
+import { authenticate, corsHeaders, jsonError, preflight } from '@/lib/api/respond';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,10 +32,10 @@ export async function GET(
       modality: entry.model.modality,
       features: entry.model.features,
     },
-    { headers: CORS_HEADERS },
+    { headers: corsHeaders(req) },
   );
 }
 
-export function OPTIONS(): Response {
-  return preflight();
+export function OPTIONS(req: Request): Response {
+  return preflight(req);
 }

@@ -1,5 +1,5 @@
 import { route } from '@/lib/router';
-import { authenticate, CORS_HEADERS, jsonError, preflight, statusForErrorKind } from '@/lib/api/respond';
+import { authenticate, corsHeaders, jsonError, preflight, statusForErrorKind } from '@/lib/api/respond';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,9 +51,9 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  return Response.json(result.response.json ?? {}, { headers: CORS_HEADERS });
+  return Response.json(result.response.json ?? {}, { headers: corsHeaders(req) });
 }
 
-export function OPTIONS(): Response {
-  return preflight();
+export function OPTIONS(req: Request): Response {
+  return preflight(req);
 }

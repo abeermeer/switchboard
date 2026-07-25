@@ -17,7 +17,7 @@ import { logger, requestLogger } from '@/lib/logger';
 import {
   authenticate,
   clientMeta,
-  CORS_HEADERS,
+  corsHeaders,
   jsonError,
   statusForErrorKind,
   typeForErrorKind,
@@ -47,12 +47,12 @@ export async function handleModality(
   try {
     raw = await req.json();
   } catch {
-    return jsonError(400, 'Request body must be valid JSON.');
+    return jsonError(400, 'Request body must be valid JSON.', undefined, null, {}, req);
   }
 
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
-    return jsonError(400, firstIssue(parsed.error as z.ZodError));
+    return jsonError(400, firstIssue(parsed.error as z.ZodError), undefined, null, {}, req);
   }
 
   const body = parsed.data as Record<string, unknown>;
@@ -119,7 +119,7 @@ export async function handleModality(
     const headers: Record<string, string> = { ...traceHeaders(result.decision, 0, null) };
     if (err.retryAfterSec !== null) headers['retry-after'] = String(err.retryAfterSec);
 
-    return jsonError(status, err.message, typeForErrorKind(err.kind), err.kind, headers);
+    return jsonError(status, err.message, typeForErrorKind(err.kind), err.kind, headers, req);
   }
 
   const response = result.response;
@@ -210,7 +210,7 @@ export async function handleModality(
         // Nginx and friends buffer SSE by default, which silently turns a
         // streaming response into a single delayed blob.
         'x-accel-buffering': 'no',
-        ...CORS_HEADERS,
+        ...corsHeaders(req),
         ...traceHeaders(result.decision, 0, model),
       },
     });
@@ -257,7 +257,7 @@ export async function handleModality(
     status: response.httpStatus,
     headers: {
       'content-type': 'application/json',
-      ...CORS_HEADERS,
+      ...corsHeaders(req),
       ...traceHeaders(result.decision, settled.costUsd, model),
     },
   });

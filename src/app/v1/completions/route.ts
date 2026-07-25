@@ -60,6 +60,6 @@ export async function POST(req: Request): Promise<Response> {
   return handleModality(shimmed, 'chat', chatSchema);
 }
 
-export function OPTIONS(): Response {
-  return preflight();
+export function OPTIONS(req: Request): Response {
+  return preflight(req);
 }

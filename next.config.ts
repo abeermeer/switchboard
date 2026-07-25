@@ -10,18 +10,11 @@ const nextConfig: NextConfig = {
     proxyTimeout: 15 * 60 * 1000,
   },
   typescript: { ignoreBuildErrors: false },
-  async headers() {
-    return [
-      {
-        source: '/v1/:path*',
-        headers: [
-          { key: 'Access-Control-Allow-Origin', value: '*' },
-          { key: 'Access-Control-Allow-Headers', value: '*' },
-          { key: 'Access-Control-Allow-Methods', value: 'GET,POST,OPTIONS,DELETE' },
-        ],
-      },
-    ];
-  },
+  // CORS is deliberately not set here. A static header block cannot inspect the
+  // request, so it could only ever emit `*` — which would hand any page in the
+  // user's browser the ability to spend their provider credentials. The route
+  // handlers set it per request via `corsHeaders()` in src/lib/api/respond.ts,
+  // which reflects only origins the operator has allowed.
 };
 
 export default nextConfig;

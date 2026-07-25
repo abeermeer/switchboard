@@ -196,6 +196,27 @@ export const MIGRATIONS: Migration[] = [
     );
     `,
   },
+  {
+    version: 2,
+    name: 'durable_rate_limits',
+    sql: `
+    -- One row per key per second of traffic. Counting per-second rather than
+    -- per-request keeps a busy key to at most 60 rows in a window instead of
+    -- one row per call, which is what makes persisting this cheap enough to
+    -- do at all.
+    --
+    -- Not keyed to api_keys by foreign key on purpose: the limiter must keep
+    -- working for a key deleted mid-window, and a cascade delete here would be
+    -- a write on the hot path for no benefit.
+    CREATE TABLE rate_limit_hits (
+      key_id     TEXT NOT NULL,
+      second_ts  INTEGER NOT NULL,
+      hits       INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (key_id, second_ts)
+    );
+    CREATE INDEX idx_rate_limit_second ON rate_limit_hits(second_ts);
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

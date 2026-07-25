@@ -1,5 +1,5 @@
 import { route } from '@/lib/router';
-import { authenticate, CORS_HEADERS, jsonError, preflight, statusForErrorKind } from '@/lib/api/respond';
+import { authenticate, corsHeaders, jsonError, preflight, statusForErrorKind } from '@/lib/api/respond';
 import { speechSchema, firstIssue } from '@/lib/api/schemas';
 
 export const runtime = 'nodejs';
@@ -51,11 +51,11 @@ export async function POST(req: Request): Promise<Response> {
   if (upstream.stream !== null) {
     return new Response(upstream.stream, {
       status: 200,
-      headers: { 'content-type': contentType, ...CORS_HEADERS },
+      headers: { 'content-type': contentType, ...corsHeaders(req) },
     });
   }
 
-  return Response.json(upstream.json ?? {}, { headers: CORS_HEADERS });
+  return Response.json(upstream.json ?? {}, { headers: corsHeaders(req) });
 }
 
 function audioMime(format: string): string {
@@ -75,6 +75,6 @@ function audioMime(format: string): string {
   }
 }
 
-export function OPTIONS(): Response {
-  return preflight();
+export function OPTIONS(req: Request): Response {
+  return preflight(req);
 }
