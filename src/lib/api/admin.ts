@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { requireLocalOrToken } from '@/lib/auth/session';
+import { logger } from '@/lib/logger';
 
 /** Shared plumbing for the management API, so each handler stays declarative. */
 
@@ -55,7 +56,7 @@ export async function handle(fn: () => Promise<Response> | Response): Promise<Re
   try {
     return await fn();
   } catch (err) {
-    console.error('[switchboard] management API error:', err);
+    logger.error('management API request failed', { err });
     const message = err instanceof Error ? err.message : 'Unexpected server error.';
     return fail(500, message);
   }

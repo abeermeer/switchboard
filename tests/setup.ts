@@ -27,6 +27,11 @@ delete process.env.SWITCHBOARD_MASTER_KEY;
 // a real provider fails loudly on a bad host rather than quietly succeeding.
 process.env.SWITCHBOARD_ALLOW_REMOTE = '0';
 
+// Breaker transitions and routing failures log by design, and the suite trips
+// them deliberately dozens of times. Without this the real output is buried.
+// logger.test.ts sets its own level, so this does not blind the logger's tests.
+process.env.SWITCHBOARD_LOG_LEVEL ??= 'silent';
+
 beforeAll(() => {
   process.env.SWITCHBOARD_DATA_DIR = root;
 });

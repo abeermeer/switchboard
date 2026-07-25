@@ -13,6 +13,7 @@ import { recordUsageBucket } from '@/lib/db/repos/usage';
 import { getSettings } from '@/lib/db/repos/settings';
 import { findModel } from '@/lib/providers/registry';
 import { settleRequest } from '@/lib/usage/cost';
+import { logger, requestLogger } from '@/lib/logger';
 import {
   authenticate,
   clientMeta,
@@ -100,6 +101,21 @@ export async function handleModality(
       logPayloads ? { request: body, response: { error: err.message } } : {},
     );
 
+    requestLogger({
+      requestId: result.decision.requestId,
+      modality,
+      requestedModel,
+      apiKeyId: auth.key?.id ?? null,
+    }).warn('no provider could serve the request', {
+      errorKind: err.kind,
+      httpStatus: status,
+      attempts: result.decision.attempts.length,
+      durationMs: Date.now() - startedAt,
+      // The per-attempt reasons are what turns "it failed" into something
+      // actionable without opening the dashboard.
+      tried: result.decision.attempts.map((a) => `${a.providerId}:${a.modelId}=${a.fallbackReason ?? a.status}`),
+    });
+
     const headers: Record<string, string> = { ...traceHeaders(result.decision, 0, null) };
     if (err.retryAfterSec !== null) headers['retry-after'] = String(err.retryAfterSec);
 
@@ -110,6 +126,21 @@ export async function handleModality(
   const winner = result.decision.winningAttempt;
   const attempt = winner === null ? null : (result.decision.attempts[winner] ?? null);
   const model = attempt === null ? null : findModel(attempt.providerId, attempt.modelId);
+
+  // A fallback is worth a line on its own: the client saw a clean 200, so this
+  // is the only place the recovery is visible outside the dashboard.
+  if (result.decision.attempts.length > 1) {
+    requestLogger({
+      requestId: result.decision.requestId,
+      modality,
+      requestedModel,
+      apiKeyId: auth.key?.id ?? null,
+    }).warn('recovered by falling back', {
+      attempts: result.decision.attempts.length,
+      servedBy: `${attempt?.providerId ?? 'unknown'}:${attempt?.modelId ?? 'unknown'}`,
+      firstFailure: result.decision.attempts[0]?.fallbackReason ?? null,
+    });
+  }
 
   // ── streaming ─────────────────────────────────────────────────────────────
   if (stream && response.stream !== null) {
@@ -347,6 +378,6 @@ function persist(input: PersistInput, payloads: { request?: unknown; response?: 
     });
   } catch (err) {
     // Logging must never take down a request that already succeeded upstream.
-    console.error('[switchboard] failed to persist request log:', err);
+    logger.error('failed to persist request log', { requestId: input.decision.requestId, err });
   }
 }

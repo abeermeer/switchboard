@@ -10,6 +10,7 @@ import {
 } from '@/lib/db/repos/health';
 import { getSettings } from '@/lib/db/repos/settings';
 import { clamp } from '@/lib/utils';
+import { logger } from '@/lib/logger';
 
 /** However badly a provider misbehaves, we retry it at least this often. */
 const MAX_COOLDOWN_MS = 900_000;
@@ -87,12 +88,24 @@ function trialWindowMs(): number {
 
 function openBreaker(row: HealthRow, now: number): HealthRow {
   const openCount = row.openCount + 1;
+  const cooldownUntil = now + cooldownFor(openCount);
+
+  // A breaker opening means a provider just left the rotation. That is the
+  // event an operator wants to see without watching the dashboard.
+  logger.warn('circuit breaker opened', {
+    connectionId: row.connectionId,
+    openCount,
+    cooldownMs: cooldownUntil - now,
+    consecutiveFailures: row.consecutiveFailures,
+    lastError: row.lastError,
+  });
+
   return {
     ...row,
     breaker: 'open',
     openCount,
     openedAt: now,
-    cooldownUntil: now + cooldownFor(openCount),
+    cooldownUntil,
   };
 }
 
@@ -136,6 +149,15 @@ export function onSuccess(
   const { p50, p95 } = recomputeLatency(connectionId);
 
   const recovered = row.breaker !== 'closed';
+  if (recovered) {
+    logger.info('circuit breaker closed', {
+      connectionId,
+      modelId,
+      from: row.breaker,
+      ttftMs,
+    });
+  }
+
   persist({
     ...row,
     breaker: 'closed',
@@ -183,6 +205,15 @@ export function onFailure(
     const waitMs = err.retryAfterSec !== null ? Math.round(err.retryAfterSec * 1_000) : fallbackMs;
     try {
       setLockout(connectionId, modelId, now + Math.max(1_000, waitMs), err.message || err.kind);
+      logger.info('model locked out', {
+        connectionId,
+        modelId,
+        kind: err.kind,
+        forMs: Math.max(1_000, waitMs),
+        // Whether the provider told us how long, or we guessed, is the first
+        // thing worth knowing when a lockout looks wrong.
+        source: err.retryAfterSec !== null ? 'retry-after' : 'default',
+      });
     } catch {
       // Connection deleted mid-flight; nothing left to lock out.
     }
