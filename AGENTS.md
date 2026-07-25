@@ -113,6 +113,15 @@ node:sqlite shipped in 22.5 but stayed behind --experimental-sqlite until
 22.13, so every stated requirement of "22.5+" was wrong.
 ```
 
+**No `Co-Authored-By` trailer.** The repository owner asked for it off and the history was
+rewritten to remove it; do not reintroduce it.
+
+## Releases
+
+Automated — bumping `version` in `package.json` on `main` cuts the release branch, tag and
+GitHub release. Never create those by hand; a manual tag blocks the workflow, which
+deliberately refuses to move an existing one.
+
 ## Security
 
 - Never commit `master.key`, `switchboard.db`, or anything under `data/`.

@@ -133,6 +133,15 @@ Write tests against the behaviour the comments describe, not for line coverage. 
 "deliberate" decision below has a test that fails if someone simplifies it away — that is
 what those tests are for.
 
+## Commits
+
+**Do not add a `Co-Authored-By: Claude` trailer.** The user asked for it off, and the
+history was rewritten on 2026-07-25 to strip it from every commit. Adding it back would
+reintroduce what was deliberately removed.
+
+Present tense, imperative subject. Put the reasoning in the body when the diff does not
+carry it — most commits here explain a decision, not a change.
+
 ## Before committing
 
 ```bash
@@ -159,5 +168,18 @@ Be honest about these rather than papering over them:
   look like the fastest candidate.
 - **`context_length` counts toward the breaker threshold**, unlike `bad_request`. A client
   looping oversized prompts can open the breaker on a healthy connection.
+- **A half-open trial that gets a 429 never reports back** — the trial slot stays held
+  until its window expires.
+- **`rateLimitPerMin: 0.5` bricks a key** — it floors to 0, blocks everything, and a
+  blocked call records no hit so it never recovers. Unreachable via `updateApiKey`, which
+  truncates; reachable via `createApiKey`.
 
-Roadmap for these lives in the audit documents the user maintains outside the repo.
+[SESSION_SUMMARY.md](SESSION_SUMMARY.md) records what changed in each session and why.
+Roadmap for the gaps lives in the audit documents the user maintains outside the repo.
+
+## Releases
+
+Automated. Bumping `version` in `package.json` on `main` makes
+`.github/workflows/release.yml` cut the `release/vX.Y.Z` branch, the tag, and the GitHub
+release with the demo video attached. **Do not create any of those by hand** — the
+workflow refuses to move an existing tag, so a manual tag blocks the real release.

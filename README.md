@@ -1,8 +1,9 @@
 # Switchboard
 
 [![CI](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-709-3ecf8e.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%E2%89%A522.13-3ecf8e.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522.13-f0912f.svg)](https://nodejs.org)
 
 **One endpoint. Every provider. Free tiers first, automatic fallback, everything local.**
 
@@ -49,6 +50,20 @@ and answers three questions the raw SDKs cannot:
 - **What happens when it is down?** The next candidate takes it, transparently.
 - **What is this actually costing me?** Per request, per model, per key, against a
   frontier-pricing baseline.
+
+### What makes it different
+
+Plenty of tools proxy several providers. The distinction here is that Switchboard **shows
+its work**.
+
+| | Typical gateway | Switchboard |
+| --- | --- | --- |
+| Why a provider was chosen | A log line, if anything | Every candidate stored with its eight weighted score factors |
+| Why the others lost | Not recorded | An explicit exclusion reason per candidate, rendered in the UI |
+| Tuning a routing policy | Change it and send real traffic | Simulate it — score the ranking without sending anything upstream |
+| Free-tier requests | Billed at list price | Settled at **$0**, so the ladder ranks correctly and spend is honest |
+| Install | Native module, needs a toolchain | `node:sqlite` — no node-gyp, identical on Windows |
+| Where a failure shows up | In your client, as a 500 | Absorbed by the fallback walk; the client sees a 200 |
 
 ---
 
@@ -121,15 +136,6 @@ npm install -g switchboard@0.2.0
 ```
 
 </details>
-
-Then point something at it:
-
-```bash
-curl http://127.0.0.1:7272/v1/chat/completions \
-  -H "Authorization: Bearer sb-live-your-key" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"auto","messages":[{"role":"user","content":"Hello"}]}'
-```
 
 `"model": "auto"` hands the decision to the router. You can also send a bare model id
 (`llama-3.3-70b-versatile`), a pinned provider (`groq/llama-3.3-70b-versatile`), or a
@@ -398,9 +404,12 @@ fail loudly if anyone "simplifies" them away.
 a matching tag and GitHub release, so you can pin to one and keep receiving fixes for that
 line without inheriting whatever landed on `main` today.
 
-Bumping `version` in `package.json` on `main` triggers it: CI typechecks, builds, boots the
-gateway, verifies the publish tarball carries no database or key, then branches, tags and
-publishes the release.
+Bumping `version` in `package.json` on `main` triggers it: CI typechecks, tests, builds,
+boots the gateway, verifies the publish tarball carries no database or key, then branches,
+tags and publishes the release.
+
+A running record of what changed and why is in [SESSION_SUMMARY.md](SESSION_SUMMARY.md),
+including the findings that are known and deliberately unfixed.
 
 ### Status
 
@@ -408,15 +417,22 @@ Pre-1.0 and honest about it. An external audit put it at **7.2/10** — strong o
 architecture, resilience and type safety, with test coverage scored 0/10 as the single
 largest gap.
 
-That gap is now closed for the routing core: ~700 tests covering scoring, cost settlement,
+That gap is now closed for the routing core: 709 tests covering scoring, cost settlement,
 candidate expansion, the breaker, the vault, the adapter error taxonomy, and the fallback
 walk end to end. Writing them surfaced a real bug — a non-ASCII character in a provider's
 error message crashed the response instead of returning the client's error, which any
 non-English upstream message would have triggered.
 
-Still open: no tests for the DB repositories, the management API or the dashboard; rate
-limiting is in-memory and resets on restart; there is no structured logging. Do not run it
-exposed to the internet without a reverse proxy and auth in front.
+Still open, and worth knowing before you rely on it:
+
+- No tests for the DB repositories, the management API, or the dashboard.
+- Rate limiting is in-memory and resets on restart.
+- No structured logging — `console.error` only, with no redaction layer.
+- `/v1/*` sends `Access-Control-Allow-Origin: *`, which is fine on loopback and
+  questionable the moment it is exposed.
+
+**Do not run it exposed to the internet** without a reverse proxy and authentication in
+front. It is built for a machine you control.
 
 ---
 
