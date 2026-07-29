@@ -18,9 +18,11 @@ architecture from there.
 ```bash
 npm run dev          # dev server on :7272
 npm run typecheck    # tsc --noEmit — must be clean before any commit
-npm run test:run     # vitest, ~850 tests, must be green before any commit
+npm run test:run     # vitest, ~1,030 tests, must be green before any commit
 npm run build        # production build; CI runs this on 4 platform/version combos
 npm start            # serve the production build
+npm run icons            # regenerate the desktop icons from the product mark
+npm run verify:electron  # structural check on the desktop packaging; runs in CI
 node bin/sb.mjs doctor   # diagnose a local install
 ```
 
@@ -130,7 +132,7 @@ npm run test:run     # once
 npm run test:ci      # with coverage
 ```
 
-~850 tests in `tests/`, on vitest. Structure:
+~1,030 tests in `tests/`, on vitest. Structure:
 
 - `tests/setup.ts` repoints `SWITCHBOARD_DATA_DIR` at a temp directory **before any module
   is imported**. This is load-bearing: the master key and the DB handle cache in module
@@ -142,6 +144,12 @@ npm run test:ci      # with coverage
   the network. The plan array is consumed one entry per upstream call, so
   `[providerError(429), chatOk()]` describes a fallback. **Nothing in the suite may reach a
   real provider.**
+- `tests/helpers/adapter.ts` — `stubAdapterUpstream()` captures the url, method, headers
+  and body of each call, so an adapter test asserts both translation directions and the
+  auth scheme in one place. Two of the Google assertions were wrong on the first pass, not
+  the code: Google authenticates with an `x-goog-api-key` header (a key in the query string
+  leaks into proxy logs), and its REST surface takes snake_case `inline_data`/`mime_type`,
+  not the camelCase the client libraries use. Check the wire format, not the SDK.
 - `tests/components/*.test.tsx` — opt into a DOM with a `@vitest-environment jsdom`
   docblock at the top of the file. Test through the accessible surface (role, name,
   `aria-*`) rather than markup, so a test fails when the component becomes unusable rather
@@ -165,6 +173,15 @@ Everything logged goes through `redact()` first — by key name (`authorization`
 `token`, …) and by value shape, so a credential pasted into free text is caught too. That
 function is the security-critical part of the module; if you extend it, extend
 `tests/unit/logger.test.ts` with it.
+
+`redact()` also runs on the way **into** the database, in `writePayloads` in
+`src/lib/db/repos/log.ts` — not on the dashboard's read path. A client's own provider key,
+arriving in a header or pasted into a prompt, would otherwise sit on disk in plain text for
+as long as the row lives, and the read path is not the only thing that can reach that table.
+
+Retention is enforced on the health tick (`enforceLogRetention` in
+`src/lib/health/probe.ts`), alongside the lockout and latency-sample sweeps. A
+`logRetentionDays` of `0` means keep forever and must stay a no-op.
 
 Tests run with `SWITCHBOARD_LOG_LEVEL=silent` because the suite trips breaker transitions
 dozens of times on purpose.
@@ -192,10 +209,11 @@ toolchain, and that claim is worth proving on every commit.
 
 Be honest about these rather than papering over them:
 
-- **Coverage is uneven.** The routing core is well covered (score 100%, cost 100%, adapter
-  helpers 99%, candidates 95%, rate limit 100%), and there are component tests for the UI
-  primitives, `LiveProvider` and the policy editor. The DB repositories, the management API
-  routes and most dashboard pages have none, and there are no end-to-end tests.
+- **Coverage is uneven.** ~75% overall. The routing core is well covered (score 100%, cost
+  100%, adapter helpers 99%, candidates 95%, rate limit 100%), the adapters are at 80%
+  through their wire-translation tests, the management API has 47 integration tests, and
+  there are component tests for the UI primitives, `LiveProvider` and the policy editor. The
+  DB repositories and most dashboard pages have none, and there are no end-to-end tests.
 - **`context_length` counts toward the breaker threshold**, unlike `bad_request`. A client
   looping oversized prompts can open the breaker on a healthy connection.
 - **A half-open trial that gets a 429 never reports back** — the trial slot stays held

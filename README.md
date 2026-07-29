@@ -1,7 +1,7 @@
 # Switchboard
 
 [![CI](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-852-3ecf8e.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-1033-3ecf8e.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.13-f0912f.svg)](https://nodejs.org)
 
@@ -24,9 +24,9 @@ no account, no cloud control plane.
 
 ## Demo
 
-[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.3.0/brag.mp4)
+[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.4.0/brag.mp4)
 
-**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.3.0/brag.mp4)**
+**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.4.0/brag.mp4)**
 
 A provider 429s mid-request, the fallback lands on a different one, and the decision trace
 explains exactly why the replacement won. Every number on screen is real output from a
@@ -132,7 +132,7 @@ docker run -d -p 7272:7272 -v switchboard-data:/data switchboard
 **Pin to a release line** — every version is branched, so you can track one:
 
 ```bash
-npm install -g switchboard@0.3.0
+npm install -g switchboard@0.4.0
 ```
 
 </details>
@@ -355,6 +355,16 @@ like credentials are redacted before anything is written — by key name (`autho
 switchboard 2>&1 | jq 'select(.level == "warn")'
 ```
 
+The same redaction runs on the way **into** the database. Every request log row stores the
+request body, the response and the routing decision, so a client that sends its own provider
+key in a header — or pastes one into a prompt — would otherwise have it written to disk in
+plain text and kept for as long as the row lives. Redacting at the storage boundary rather
+than on the dashboard's read path means nothing else that can reach the table sees the
+original either.
+
+Rows are pruned to the **Log retention** setting on each health tick. `0` means keep
+forever, which is a legitimate choice rather than an unconfigured one.
+
 ---
 
 ## CLI
@@ -387,7 +397,21 @@ Produces an installer in `release/`. The desktop build runs the gateway as a chi
 writes to a real app-data directory, and lives in the system tray with start-at-login,
 copy-endpoint and restart controls.
 
-Icons go in `electron/assets/icon.{ico,icns,png}` — the build works without them.
+Icons are generated from the product mark rather than committed by hand:
+
+```bash
+npm run icons             # icon.png/.ico/.icns + tray at 1x and 2x
+npm run verify:electron   # structural check, no toolchain download
+```
+
+`verify:electron` runs on every CI leg and is the cheap half of the packaging check: the
+builder config loads, every referenced icon exists with the right magic bytes *and*
+dimensions, `main.cjs` and `preload.cjs` parse, the preload goes through `contextBridge`
+without handing over `ipcRenderer`, and `contextIsolation` / `sandbox` are still on. The
+expensive half is a real `electron-builder` run on Windows and Linux in
+[desktop.yml](.github/workflows/desktop.yml), which also asserts the installer is larger
+than 20 MB — electron-builder exits 0 having shipped only the shell if the `files` globs are
+wrong.
 
 ---
 
@@ -413,19 +437,27 @@ contribution workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 ### Tests
 
 ```bash
-npm run test:run     # ~850 tests
+npm run test:run     # ~1,030 tests
 npm run test:ci      # with coverage
 ```
 
-Vitest, running on every CI leg. The suite covers the parts where a silent bug costs money
-or loses a request: the scoring model (100%), cost and free-tier settlement (100%), rate
-limiting (100%), the adapter helpers that classify every upstream error (99%), candidate
-expansion and exclusion (95%), the circuit breaker's full state machine, the credential
-vault and its redaction layer, and an integration layer that drives the real route handlers
-against a stubbed provider — including the fallback walk itself.
+Vitest, running on every CI leg. Roughly 75% overall, concentrated where a silent bug costs
+money or loses a request:
 
-There are component tests too, for the UI primitives, the live-event transport's
-reconnection and backoff, and the policy editor's chain reordering.
+| Area | Coverage |
+| --- | --- |
+| Scoring, cost and free-tier settlement, rate limiting | 100% |
+| Adapter helpers — the error taxonomy every fallback depends on | 99% |
+| Candidate expansion and exclusion reasons | 95% |
+| Circuit breaker state machine | 100% statements |
+| Wire translation for Anthropic, Google and Cohere | ~80% |
+| Credential vault and the redaction layer | ~94% |
+
+The adapter tests run through the real `execute()` path with `fetch` stubbed, so each one
+covers the URL, the auth headers, both translation directions and the error classification
+together. There are integration tests for the gateway and the management API, and component
+tests for the UI primitives, the live-event transport's reconnection, and the policy
+editor.
 
 Tests assert the behaviour the code's comments claim, so the deliberate decisions
 (`bad_request` never retries, a started stream is never retried, free tiers settle at $0)
@@ -450,16 +482,22 @@ Pre-1.0, and specific about what that means.
 
 An external audit put it at **7.2/10** — strong on architecture, resilience and type
 safety, with test coverage scored **0/10** as the single largest gap, alongside five
-smaller findings. All six are now closed:
+smaller findings. A second pass raised four more once those were closed. All ten are now
+closed:
 
 | Finding | Resolution |
 | --- | --- |
-| No test suite | 852 tests; the routing core at 95–100% |
-| Rate limiting reset on restart | Persisted in SQLite |
+| No test suite | 1,033 tests; the routing core at 95–100% |
+| Rate limiting reset on restart | Persisted in SQLite, counted per second so it stays cheap on the hot path |
 | `/v1` sent `Access-Control-Allow-Origin: *` | No CORS by default; explicit origin allowlist |
 | No structured logging | JSON logs with a tested redaction layer |
 | Desktop build shipped a stock icon | Icons generated from the product mark |
 | Failed requests skewed latency | Filtered to successes only |
+| Adapter translation barely covered (27%) | 121 tests across the Anthropic, Google and Cohere wire formats; adapters at 80% |
+| Management API routes untested | 47 integration tests driving the real handlers |
+| Log retention setting was never applied | Enforced on the health tick; `0` still means keep forever |
+| Request payloads stored unredacted | Redacted at the storage boundary, not on the read path |
+| Desktop packaging unverified beyond local dev | `npm run verify:electron` on every CI leg, plus a real `electron-builder` run on Windows and Linux |
 
 Writing the tests found three real bugs that had survived every manual check: a non-ASCII
 character in a provider's error message crashed the response instead of returning the
@@ -469,12 +507,13 @@ preferred it.
 
 **Still open**, and worth knowing before you rely on it:
 
-- No tests for the DB repositories, the management API, or most dashboard pages, and no
-  end-to-end tests.
+- No tests for the DB repositories or most dashboard pages, and no end-to-end tests.
 - No audit log of administrative actions.
 - No graceful shutdown — `SIGTERM` kills in-flight streams rather than draining them.
 - `context_length` counts toward the circuit breaker, unlike `bad_request`, so a client
   looping oversized prompts can open the breaker on a healthy provider.
+- A half-open breaker trial that gets a 429 never reports back, so the trial slot stays
+  held until its window expires.
 
 **Do not run it exposed to the internet** without a reverse proxy and authentication in
 front. It is built for a machine you control. See [SECURITY.md](SECURITY.md) for the threat

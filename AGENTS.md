@@ -28,9 +28,14 @@ Ubuntu and Windows.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict
-npm run test:run    # vitest, ~850 tests
+npm run test:run    # vitest, ~1,030 tests
 npm run build
 ```
+
+If you touch anything under `electron/`, add `npm run verify:electron` — it checks the
+builder config, the icons (magic bytes *and* dimensions), that both scripts parse, and that
+the renderer hardening flags are still on. CI runs it on every leg; the real
+`electron-builder` run lives in `.github/workflows/desktop.yml`.
 
 ### Writing tests
 
@@ -111,6 +116,10 @@ Each has a comment at the site explaining why. Read it before changing it.
 `src/lib/logger.ts` — JSON lines, child loggers, and a `redact()` pass over everything
 written. Never log a credential; if you extend the redaction rules, extend
 `tests/unit/logger.test.ts` with them.
+
+The same `redact()` runs before request payloads are written to the database
+(`src/lib/db/repos/log.ts`), so a client's own key never lands on disk in plain text.
+Retention is applied on the health tick; `logRetentionDays: 0` means keep forever.
 
 ## Adding a provider
 

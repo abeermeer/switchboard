@@ -6,6 +6,7 @@ A running record of what was built, why, and what is still open. Newest first.
 
 | Version | What it was |
 | --- | --- |
+| **v0.4.0** | Closes the second round of audit findings: adapter wire-translation tests (adapters 27% → 80%), management API route tests, log retention actually enforced, request payloads redacted before they reach disk, and desktop packaging verified in CI rather than assumed. |
 | **v0.3.0** | Closes every remaining audit finding. **Breaking:** `/v1` no longer sends a wildcard `Access-Control-Allow-Origin`, so a browser client must now list its origin in `SWITCHBOARD_CORS_ORIGINS`. Server-side SDK clients are unaffected. |
 | **v0.2.0** | The test suite (0 → 709), a working global install, and release automation. |
 | **v0.1.0** | First public release: the gateway, dashboard, CLI and desktop shell. |
@@ -13,6 +14,71 @@ A running record of what was built, why, and what is still open. Newest first.
 Releases are cut automatically by a version bump on `main` — see
 [README](README.md#releases). Never tag by hand; the workflow refuses to move an existing
 tag, so a manual one blocks the real release.
+
+---
+
+## 2026-07-30 — Closing the second round of audit findings
+
+A follow-up audit named four gaps once the first six were closed. All four were verified
+against the code, all four were accurate, and all four are now closed. Suite 852 → **1,033
+tests**; overall coverage **75.47%**.
+
+### Adapter translation coverage: 27% → 80%
+
+The shared adapter *helpers* were at 99% while the three non-OpenAI adapters themselves sat
+at 27% — meaning the error taxonomy was well tested but the actual request and response
+translation was not, and that is where a silent bug produces a wrong answer rather than a
+loud failure. 121 tests across `anthropicAdapter` (44), `googleAdapter` (40) and
+`cohereAdapter` (37), each driving the real `execute()` path with `fetch` stubbed by
+`stubAdapterUpstream()`, so one test covers the URL, the auth scheme, both translation
+directions and the error classification together. Streaming tests include frames split
+across chunk boundaries.
+
+**Two of my own assumptions were wrong, not the code.** Google authenticates with an
+`x-goog-api-key` header rather than `?key=`, which is the better choice — a key in a query
+string leaks into every proxy and access log on the path. And its REST surface takes
+snake_case `inline_data` / `mime_type`, not the camelCase the client libraries expose. The
+tests were fixed and a `file_data` case added for remote images.
+
+### Management API route tests
+
+47 integration tests in `tests/integration/adminApi.test.ts`, driving the real route
+handlers: connections, keys, policies, settings, health and the simulator. The simulator
+test deliberately runs with **no fetch stub installed at all**, so if that endpoint ever
+started reaching a provider the test would fail by throwing rather than by passing quietly.
+
+### Log retention was a setting that did nothing
+
+`logRetentionDays` was in settings, rendered in the UI, and read by nothing. Rows
+accumulated forever. `enforceLogRetention()` now runs on the health tick beside the lockout
+and latency-sample sweeps. `0` still means keep forever — that is a legitimate choice, so it
+stays a no-op rather than becoming "prune everything".
+
+### Payload redaction at the storage boundary
+
+Every request log row stores the request body, the response and the routing decision. A
+client sending its own provider key in a header, or pasting one into a prompt, had it written
+to disk in plain text and kept for as long as the row lived. `redact()` now runs in
+`writePayloads` on the way *in* — not on the dashboard's read path, because the read path is
+not the only thing that can reach that table.
+
+### Desktop packaging verified rather than assumed
+
+`scripts/verify-electron.mjs` — 11 checks, on every CI leg: the builder config loads and
+names an entry point that exists, every referenced icon exists with correct magic bytes
+**and** PNG dimensions, `main.cjs`/`preload.cjs` compile via `vm.Script`, the preload uses
+`contextBridge` without exposing `ipcRenderer` wholesale, and `contextIsolation` /
+`nodeIntegration: false` / `sandbox` / `setWindowOpenHandler` are all still present.
+
+The expensive half is `.github/workflows/desktop.yml`: a real `electron-builder` run
+producing an NSIS installer on Windows and an AppImage on Linux, which then asserts the
+artefact is **larger than 20 MB** — electron-builder exits 0 having shipped only the shell
+when the `files` globs are wrong, so existence alone proves nothing. First run produced
+143 MB and 193 MB.
+
+My first version of the verifier flagged the tray icon as "implausibly small (443 bytes)".
+That was a false positive: a 32px tray glyph legitimately is that small. File size was the
+wrong signal; the check now reads the PNG IHDR and enforces a per-icon minimum edge.
 
 ---
 

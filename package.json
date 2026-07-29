@@ -1,6 +1,6 @@
 {
   "name": "switchboard",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": false,
   "description": "Switchboard \u2014 a local-first AI gateway. One OpenAI-compatible endpoint, every provider, free-first smart routing with automatic fallback.",
   "license": "MIT",
