@@ -7,9 +7,11 @@ import {
   pruneLatencySamples,
   upsertHealthRow,
 } from '@/lib/db/repos/health';
+import { pruneLogs } from '@/lib/db/repos/log';
 import { getSettings } from '@/lib/db/repos/settings';
 import { getAdapter, getProvider } from '@/lib/providers/registry';
 import { onFailure, onSuccess } from '@/lib/resilience/breaker';
+import { logger } from '@/lib/logger';
 
 export interface ProbeResult {
   ok: boolean;
@@ -28,6 +30,33 @@ const PROBE_MODEL_ID = '__probe__';
 const PROBE_ABORT_MS = 20_000;
 
 const SAMPLE_RETENTION_MS = 86_400_000;
+
+const DAY_MS = 86_400_000;
+
+/**
+ * Applies the operator's `logRetentionDays` setting.
+ *
+ * Nothing enforced it before: the field was settable, stored and displayed, and
+ * the only caller of `pruneLogs` was a button in the dashboard. Payload logging
+ * is on by default, so "keep 30 days" quietly meant "keep every prompt and
+ * completion forever". Runs on the health tick because that loop already exists
+ * and is already the place bounded housekeeping happens.
+ */
+function enforceLogRetention(): void {
+  try {
+    const days = getSettings().logRetentionDays;
+    // 0 means "keep forever", which is a legitimate choice rather than a bug.
+    if (!Number.isFinite(days) || days <= 0) return;
+
+    const removed = pruneLogs(Date.now() - days * DAY_MS);
+    if (removed > 0) {
+      logger.info('pruned expired request logs', { removed, retentionDays: days });
+    }
+  } catch (err) {
+    // Housekeeping must never take the probe loop down with it.
+    logger.warn('log retention sweep failed', { err });
+  }
+}
 
 /** Node's timers can be unref'd so a background loop never holds the process open. */
 function unref(timer: unknown): void {
@@ -205,6 +234,7 @@ async function runRound(generation: number, intervalMs: number): Promise<void> {
   try {
     clearExpiredLockouts();
     pruneLatencySamples(SAMPLE_RETENTION_MS);
+    enforceLogRetention();
 
     const targets = probeTargets();
     const gap = spacingMs(intervalMs, targets.length);

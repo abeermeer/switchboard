@@ -6,6 +6,7 @@ import type {
   TokenUsage,
 } from '@/types/core';
 import { getDb, parseJson, toBool, toInt, transact } from '@/lib/db/client';
+import { redact } from '@/lib/logger';
 import {
   asRow,
   asRows,
@@ -136,9 +137,15 @@ export function insertRequestLog(
       );
 
     if (!payloads) return;
-    const decision = payloads.decision ? safeStringify(payloads.decision) : null;
-    const request = safeStringify(payloads.request);
-    const response = safeStringify(payloads.response);
+
+    // Redacted on the way in, not on the way out. A client that puts its own
+    // provider key in a header, or pastes one into a prompt, would otherwise
+    // have it written to disk in plain text and kept for as long as the row
+    // lives — and the dashboard's read path is not the only thing that can
+    // reach this table.
+    const decision = payloads.decision ? safeStringify(redact(payloads.decision)) : null;
+    const request = safeStringify(redact(payloads.request));
+    const response = safeStringify(redact(payloads.response));
     if (decision === null && request === null && response === null) return;
 
     handle
