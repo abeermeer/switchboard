@@ -50,6 +50,12 @@ on the label belongs to you.
   global prefix, and runs `switchboard --version` and `sb --version` through the real shims,
   asserting the reported version matches the manifest and that `.next` shipped. This is the
   check that was missing. It runs on all four CI legs and before every release.
+
+  Its own first CI run failed on both Ubuntu legs claiming the tarball had no build. The
+  tarball was fine: `npm install -g --prefix` nests at `<prefix>/node_modules/<name>` on
+  Windows and `<prefix>/lib/node_modules/<name>` everywhere else, and the check only knew the
+  Windows layout — so it passed locally and failed in CI. Exactly the platform split the
+  Windows CI leg exists to catch, pointing the other way.
 - **Gated `npm publish` in the release workflow** — fires only when an `NPM_TOKEN` secret
   exists, so a release without one still cuts its branch, tag and GitHub release.
 

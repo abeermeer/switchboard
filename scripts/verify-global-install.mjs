@@ -109,8 +109,16 @@ try {
 
       // The build is what makes the installed copy runnable at all; without it
       // `switchboard` starts, prints "No production build found", and exits.
-      const installedRoot = join(prefix, 'node_modules', manifest.name);
-      if (!existsSync(join(installedRoot, '.next', 'BUILD_ID'))) {
+      //
+      // npm nests differently per platform: `<prefix>/node_modules/<name>` on
+      // Windows, `<prefix>/lib/node_modules/<name>` everywhere else. Checking
+      // only the Windows layout passed locally and failed on Ubuntu claiming the
+      // tarball had no build — the build was there, the path was wrong.
+      const candidates = [
+        join(prefix, 'node_modules', manifest.name, '.next', 'BUILD_ID'),
+        join(prefix, 'lib', 'node_modules', manifest.name, '.next', 'BUILD_ID'),
+      ];
+      if (!candidates.some((path) => existsSync(path))) {
         problems.push('the tarball carries no .next build — the installed command cannot start');
       } else {
         console.log('  ok    production build shipped inside the package');
