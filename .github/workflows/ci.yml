@@ -40,6 +40,11 @@ jobs:
 
       - run: npm ci
 
+      # A single registry GET. Cheap, and it is the only thing standing between
+      # the README's install instruction and a package somebody else controls.
+      - name: Verify the npm name is ours
+        run: npm run verify:name
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -58,6 +63,14 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      # The one check nothing else covered: install the packed artefact into a
+      # throwaway global prefix and run the command a user types. Everything else
+      # in this file runs against the repository, which is why a README telling
+      # people to install a package we did not own stayed green for three
+      # releases.
+      - name: Verify a global install produces a working command
+        run: npm run verify:install
 
       - name: Boot the gateway and probe it
         shell: bash

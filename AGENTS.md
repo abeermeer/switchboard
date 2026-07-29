@@ -28,9 +28,13 @@ Ubuntu and Windows.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict
-npm run test:run    # vitest, ~1,030 tests
+npm run test:run    # vitest, ~1,035 tests
 npm run build
 ```
+
+Before a release, also run `npm run verify:name` and `npm run verify:install` — the second
+packs the tarball, installs it into a throwaway global prefix and runs the command a user
+types. Nothing else in the pipeline touches the installed artefact.
 
 If you touch anything under `electron/`, add `npm run verify:electron` — it checks the
 builder config, the icons (magic bytes *and* dimensions), that both scripts parse, and that

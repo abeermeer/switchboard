@@ -5,6 +5,7 @@ import { usageTotals } from '@/lib/db/repos/usage';
 import { listApiKeys } from '@/lib/db/repos/apiKeys';
 import { listCombos } from '@/lib/db/repos/combos';
 import { guard, handle, ok } from '@/lib/api/admin';
+import { VERSION } from '@/lib/version';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,7 @@ export function GET(req: Request): Promise<Response> {
     }
 
     return ok({
-      version: '0.1.0',
+      version: VERSION,
       uptimeMs: Date.now() - BOOTED_AT,
       port: Number(process.env.PORT ?? 7272),
       dataDir: dataDir(),

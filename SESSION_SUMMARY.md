@@ -6,6 +6,7 @@ A running record of what was built, why, and what is still open. Newest first.
 
 | Version | What it was |
 | --- | --- |
+| **v0.4.1** | The published install actually works: the npm package is now **`switchboard-gateway`** (plain `switchboard` is someone else's library), `/api/system/status` reports the real version, and CI installs the packed tarball to prove the command exists. |
 | **v0.4.0** | Closes the second round of audit findings: adapter wire-translation tests (adapters 27% → 80%), management API route tests, log retention actually enforced, request payloads redacted before they reach disk, and desktop packaging verified in CI rather than assumed. |
 | **v0.3.0** | Closes every remaining audit finding. **Breaking:** `/v1` no longer sends a wildcard `Access-Control-Allow-Origin`, so a browser client must now list its origin in `SWITCHBOARD_CORS_ORIGINS`. Server-side SDK clients are unaffected. |
 | **v0.2.0** | The test suite (0 → 709), a working global install, and release automation. |
@@ -14,6 +15,55 @@ A running record of what was built, why, and what is still open. Newest first.
 Releases are cut automatically by a version bump on `main` — see
 [README](README.md#releases). Never tag by hand; the workflow refuses to move an existing
 tag, so a manual one blocks the real release.
+
+---
+
+## 2026-07-30 (later) — The install instruction was pointing at someone else's package
+
+The user ran the README's first command and got
+`switchboard : The term 'switchboard' is not recognized...`. The install had succeeded —
+`added 2 packages, removed 64 packages` — because **`switchboard` on npm is not ours**. It is
+an unrelated event-listener library from 2022, version 1.3.0, with no `bin` field at all. So
+`npm install -g switchboard` installed that, created no command, and the failure looked like a
+bug in our CLI.
+
+The package had never been published under a name we own, and the README had said otherwise
+since v0.1.0.
+
+### What was wrong with the pipeline, not just the name
+
+Everything upstream was green and none of it could have caught this. Typecheck, 1,033 tests,
+four build legs, a booted gateway, a tarball-contents check — every one of them runs against
+the *repository*. Nothing ever installed the artefact and typed the command. `npm pack
+--dry-run` proved the tarball's contents were clean; it says nothing about whether the name
+on the label belongs to you.
+
+### Fixes
+
+- **Renamed to `switchboard-gateway`** (verified unregistered). The commands are unchanged —
+  `bin` still installs `switchboard` and `sb`, so only the install line got longer.
+- **`scripts/verify-package-name.mjs`** — asks the registry whether the name in
+  `package.json` is unregistered or published from this repository, and fails if someone else
+  holds it. Runs on every CI leg; one HTTP GET. Tested against the squatted name, where it
+  fails with the actual owner's repository URL in the message.
+- **`scripts/verify-global-install.mjs`** — packs the tarball, installs it into a throwaway
+  global prefix, and runs `switchboard --version` and `sb --version` through the real shims,
+  asserting the reported version matches the manifest and that `.next` shipped. This is the
+  check that was missing. It runs on all four CI legs and before every release.
+- **Gated `npm publish` in the release workflow** — fires only when an `NPM_TOKEN` secret
+  exists, so a release without one still cuts its branch, tag and GitHub release.
+
+### A second bug the install test surfaced
+
+Booting the installed copy showed `/api/system/status` returning `"version": "0.1.0"` — a
+hardcoded literal, from a 0.4.0 install. That is the worst possible lie for that field: it is
+what someone reads to decide whether an upgrade took effect. Now read from the manifest
+(`src/lib/version.ts`), with two tests pinning it to `package.json` so the literal cannot
+come back.
+
+Verified by installing the real tarball to a temp prefix, running the CLI, booting the
+gateway on :7399 and probing `/api/system/status` and `/v1/models` — both 200, version
+`0.4.1`.
 
 ---
 

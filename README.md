@@ -1,7 +1,7 @@
 # Switchboard
 
 [![CI](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1033-3ecf8e.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-1035-3ecf8e.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.13-f0912f.svg)](https://nodejs.org)
 
@@ -24,9 +24,9 @@ no account, no cloud control plane.
 
 ## Demo
 
-[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.4.0/brag.mp4)
+[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.4.1/brag.mp4)
 
-**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.4.0/brag.mp4)**
+**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.4.1/brag.mp4)**
 
 A provider 429s mid-request, the fallback lands on a different one, and the decision trace
 explains exactly why the replacement won. Every number on screen is real output from a
@@ -72,17 +72,21 @@ its work**.
 **1) Install and run**
 
 ```bash
-npm install -g switchboard
+npm install -g switchboard-gateway
 switchboard
 ```
 
 That's it. The dashboard is on **http://localhost:7272**, the gateway on
 **http://localhost:7272/v1**.
 
+> The npm package is **`switchboard-gateway`** — plain `switchboard` on npm is an unrelated
+> 2022 event-listener library with no executable, so installing that gives you no command.
+> The commands this package installs are still `switchboard` and `sb`.
+
 Your database and encryption key live in your OS application-data directory
 (`%APPDATA%\Switchboard`, `~/Library/Application Support/Switchboard`, or
-`~/.local/share/Switchboard`), so upgrading with `npm update -g switchboard` never touches
-them.
+`~/.local/share/Switchboard`), so upgrading with `npm update -g switchboard-gateway` never
+touches them.
 
 **2) Connect a free provider**
 
@@ -132,7 +136,7 @@ docker run -d -p 7272:7272 -v switchboard-data:/data switchboard
 **Pin to a release line** — every version is branched, so you can track one:
 
 ```bash
-npm install -g switchboard@0.4.0
+npm install -g switchboard-gateway@0.4.1
 ```
 
 </details>
@@ -418,11 +422,18 @@ wrong.
 ## Development
 
 ```bash
-npm run dev          # dev server on :7272
-npm run typecheck    # tsc --noEmit, strict
-npm run build        # production build
-npm run electron:dev # desktop shell against the dev server
+npm run dev            # dev server on :7272
+npm run typecheck      # tsc --noEmit, strict
+npm run build          # production build
+npm run electron:dev   # desktop shell against the dev server
+npm run verify:name    # the npm name still resolves to this repository
+npm run verify:install # pack, install globally, run the command
 ```
+
+`verify:install` is the check that matters before a release: it packs the tarball, installs
+it into a throwaway global prefix, and runs `switchboard --version` and `sb --version`. Every
+other check in CI runs against the repository, so none of them could tell that the published
+install instruction pointed at a different package entirely.
 
 Requires **Node 22.13+** — `node:sqlite` appeared in 22.5 but was flag-gated until 22.13.
 Built with Next.js 16, React 19,
@@ -437,7 +448,7 @@ contribution workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 ### Tests
 
 ```bash
-npm run test:run     # ~1,030 tests
+npm run test:run     # ~1,035 tests
 npm run test:ci      # with coverage
 ```
 
@@ -487,7 +498,7 @@ closed:
 
 | Finding | Resolution |
 | --- | --- |
-| No test suite | 1,033 tests; the routing core at 95–100% |
+| No test suite | 1,035 tests; the routing core at 95–100% |
 | Rate limiting reset on restart | Persisted in SQLite, counted per second so it stays cheap on the hot path |
 | `/v1` sent `Access-Control-Allow-Origin: *` | No CORS by default; explicit origin allowlist |
 | No structured logging | JSON logs with a tested redaction layer |
@@ -498,6 +509,8 @@ closed:
 | Log retention setting was never applied | Enforced on the health tick; `0` still means keep forever |
 | Request payloads stored unredacted | Redacted at the storage boundary, not on the read path |
 | Desktop packaging unverified beyond local dev | `npm run verify:electron` on every CI leg, plus a real `electron-builder` run on Windows and Linux |
+| `npm install -g switchboard` installed someone else's package | Renamed to `switchboard-gateway`; CI now checks the registry name and installs the packed tarball to prove the command works |
+| `/api/system/status` reported a hardcoded `0.1.0` | Read from the manifest, with a test pinning it |
 
 Writing the tests found three real bugs that had survived every manual check: a non-ASCII
 character in a provider's error message crashed the response instead of returning the

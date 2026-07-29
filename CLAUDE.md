@@ -18,11 +18,13 @@ architecture from there.
 ```bash
 npm run dev          # dev server on :7272
 npm run typecheck    # tsc --noEmit — must be clean before any commit
-npm run test:run     # vitest, ~1,030 tests, must be green before any commit
+npm run test:run     # vitest, ~1,035 tests, must be green before any commit
 npm run build        # production build; CI runs this on 4 platform/version combos
 npm start            # serve the production build
 npm run icons            # regenerate the desktop icons from the product mark
 npm run verify:electron  # structural check on the desktop packaging; runs in CI
+npm run verify:name      # the npm name still resolves to this repository
+npm run verify:install   # pack, install to a temp global prefix, run the command
 node bin/sb.mjs doctor   # diagnose a local install
 ```
 
@@ -96,8 +98,13 @@ Do not "fix" these:
   both misrank the free-first ladder and overstate the user's spend.
 - **An empty combo member chain means "consider every eligible connection."** It is the
   default and usually correct, not an unconfigured state.
+- **The npm package is `switchboard-gateway`, not `switchboard`.** The short name belongs to
+  an unrelated 2022 library with no `bin`, so `npm install -g switchboard` installs that and
+  leaves the user with no command — which is exactly what happened. The *commands* are still
+  `switchboard` and `sb`; only the package name is longer. `npm run verify:name` fails if the
+  name in `package.json` resolves to a package published from another repository.
 - **The CLI pins `SWITCHBOARD_DATA_DIR` when it spawns the server.** Without it, a global
-  install writes the database into `node_modules/switchboard/data`, and the next
+  install writes the database into `node_modules/switchboard-gateway/data`, and the next
   `npm update -g` deletes it along with every sealed credential.
 - **`/v1` sends no `Access-Control-Allow-Origin` unless one is configured.** The gateway is
   for server-side SDK clients, which are unaffected by CORS; a wildcard would let any page
@@ -132,7 +139,7 @@ npm run test:run     # once
 npm run test:ci      # with coverage
 ```
 
-~1,030 tests in `tests/`, on vitest. Structure:
+~1,035 tests in `tests/`, on vitest. Structure:
 
 - `tests/setup.ts` repoints `SWITCHBOARD_DATA_DIR` at a temp directory **before any module
   is imported**. This is load-bearing: the master key and the DB handle cache in module

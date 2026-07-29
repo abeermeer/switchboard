@@ -92,6 +92,18 @@ jobs:
           curl -fsS http://127.0.0.1:7272/v1/models > /dev/null
           echo "gateway serves"
 
+      # The npm name must still be ours. Publishing instructions that point at
+      # someone else's package is the failure this catches — it shipped once.
+      - name: Verify the npm name
+        if: steps.exists.outputs.already == 'false'
+        run: npm run verify:name
+
+      # Installs the packed artefact into a throwaway prefix and runs the command
+      # a user types. Green builds proved nothing about this.
+      - name: Verify a global install works
+        if: steps.exists.outputs.already == 'false'
+        run: npm run verify:install
+
       # Confirms the tarball is installable and, critically, that it carries no
       # database or master key.
       - name: Verify the publish tarball
@@ -103,6 +115,19 @@ jobs:
             exit 1
           fi
           echo "tarball clean"
+
+      # Skips itself until an NPM_TOKEN secret exists, so the release still cuts
+      # its branch, tag and GitHub release without one. Nothing here can publish
+      # by accident: no token, no publish.
+      - name: Publish to npm
+        if: steps.exists.outputs.already == 'false' && env.NPM_TOKEN != ''
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > ~/.npmrc
+          # --provenance would need id-token write; publish plainly instead.
+          npm publish --access public
+          rm -f ~/.npmrc
 
       - name: Create the release branch
         if: steps.exists.outputs.already == 'false'
@@ -127,7 +152,7 @@ jobs:
           Install or upgrade:
 
           ```bash
-          npm install -g switchboard
+          npm install -g switchboard-gateway
           switchboard
           ```
 
