@@ -1,0 +1,110 @@
+name: Desktop
+
+# A real electron-builder run downloads a platform toolchain and takes minutes,
+# so it does not belong on every push. The cheap structural half runs in CI on
+# every commit (`npm run verify:electron`); this is the half that proves an
+# installer actually comes out the other side.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'electron/**'
+      - 'scripts/make-icons.mjs'
+      - 'scripts/verify-electron.mjs'
+      - 'package.json'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    paths:
+      - 'electron/**'
+      - 'package.json'
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package · ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows is the primary target and the one users download, so its
+          # real NSIS installer is worth the build minutes.
+          - os: windows-latest
+            label: Windows NSIS
+            flag: --win
+            # Two artefacts to look for, because electron-builder names the
+            # installer from productName + version.
+            pattern: 'release/*.exe'
+          # Linux doubles as a cheap check that the config is not
+          # Windows-specific; AppImage needs no signing toolchain.
+          - os: ubuntu-latest
+            label: Linux AppImage
+            flag: --linux AppImage
+            pattern: 'release/*.AppImage'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # Regenerated rather than trusted: the icons are produced from the product
+      # mark by a script, so this also proves that script still works.
+      - name: Generate icons
+        run: npm run icons
+
+      - name: Verify the packaging structure
+        run: npm run verify:electron
+
+      - name: Build the web app
+        run: npm run build
+
+      - name: Package the desktop app
+        # No signing: that needs a certificate this repository does not hold.
+        # An unsigned installer still proves the config, the files globs and the
+        # icons are correct, which is what was previously unverified.
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder ${{ matrix.flag }} --config electron/builder.config.cjs --publish never
+
+      - name: Confirm an installer was actually produced
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(${{ matrix.pattern }})
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::electron-builder exited 0 but produced no installer matching ${{ matrix.pattern }}"
+            ls -la release/ || echo "no release/ directory at all"
+            exit 1
+          fi
+
+          for file in "${files[@]}"; do
+            size=$(wc -c < "$file")
+            echo "$file — $((size / 1024 / 1024)) MB"
+            # An Electron installer is tens of megabytes. Anything under 20 MB
+            # means the app payload was left out and only the shell shipped.
+            if [ "$size" -lt 20000000 ]; then
+              echo "::error::$file is only $((size / 1024 / 1024)) MB — the app payload is missing"
+              exit 1
+            fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: switchboard-${{ matrix.os }}
+          path: ${{ matrix.pattern }}
+          # Long enough to download and try, short enough not to accumulate.
+          retention-days: 7
+          if-no-files-found: error

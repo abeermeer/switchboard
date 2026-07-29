@@ -49,6 +49,13 @@ jobs:
       - name: Test
         run: npm run test:run
 
+      # Cheap: no toolchain download, no packaging. Catches a missing icon, a
+      # syntax error in the shell, or the renderer hardening flags being turned
+      # off — all of which previously only surfaced when someone built an
+      # installer by hand. The real packaging run lives in desktop.yml.
+      - name: Verify desktop packaging
+        run: npm run verify:electron
+
       - name: Build
         run: npm run build
 
