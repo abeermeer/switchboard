@@ -152,9 +152,14 @@ jobs:
           Install or upgrade:
 
           ```bash
-          npm install -g switchboard-gateway
+          git clone -b ${{ steps.v.outputs.branch }} https://github.com/abeermeer/switchboard.git
+          cd switchboard && npm install && npm run build && npm install -g .
           switchboard
           ```
+
+          Once the npm publish lands, `npm install -g switchboard-gateway` replaces those
+          four lines. The short name `switchboard` on npm is an unrelated package — not
+          this one.
 
           Dashboard on http://localhost:7272 · endpoint on http://localhost:7272/v1
 

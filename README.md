@@ -72,21 +72,25 @@ its work**.
 **1) Install and run**
 
 ```bash
-npm install -g switchboard-gateway
+git clone https://github.com/abeermeer/switchboard.git
+cd switchboard
+npm install && npm run build
+npm install -g .          # puts `switchboard` and `sb` on your PATH
 switchboard
 ```
 
 That's it. The dashboard is on **http://localhost:7272**, the gateway on
 **http://localhost:7272/v1**.
 
-> The npm package is **`switchboard-gateway`** — plain `switchboard` on npm is an unrelated
-> 2022 event-listener library with no executable, so installing that gives you no command.
-> The commands this package installs are still `switchboard` and `sb`.
+> **Not on npm yet.** The package name is **`switchboard-gateway`** and
+> `npm install -g switchboard-gateway` will be the one-liner once it is published — plain
+> `switchboard` on npm is an unrelated 2022 event-listener library with no executable, so
+> installing *that* leaves you with no command at all. Until the publish lands, use the four
+> lines above; they install the same artefact CI verifies on every commit.
 
 Your database and encryption key live in your OS application-data directory
 (`%APPDATA%\Switchboard`, `~/Library/Application Support/Switchboard`, or
-`~/.local/share/Switchboard`), so upgrading with `npm update -g switchboard-gateway` never
-touches them.
+`~/.local/share/Switchboard`), so reinstalling or upgrading never touches them.
 
 **2) Connect a free provider**
 
@@ -113,11 +117,9 @@ curl http://127.0.0.1:7272/v1/chat/completions \
 <details>
 <summary><b>Other ways to run it</b></summary>
 
-**From source**
+**From a checkout, without installing globally**
 
 ```bash
-git clone https://github.com/abeermeer/switchboard.git
-cd switchboard
 npm install
 npm run build
 npm start
@@ -133,11 +135,14 @@ docker run -d -p 7272:7272 -v switchboard-data:/data switchboard
 **Desktop app** — `npm run electron:build:win` (or `:mac` / `:linux`) puts an installer in
 `release/`. Runs in the tray with start-at-login.
 
-**Pin to a release line** — every version is branched, so you can track one:
+**Pin to a release line** — every version is branched and tagged, so you can track one
+without waiting on npm:
 
 ```bash
-npm install -g switchboard-gateway@0.4.1
+git clone -b release/v0.4.1 https://github.com/abeermeer/switchboard.git
 ```
+
+Once the npm publish lands, `npm install -g switchboard-gateway@0.4.1` does the same.
 
 </details>
 
@@ -520,6 +525,8 @@ preferred it.
 
 **Still open**, and worth knowing before you rely on it:
 
+- **Not published to npm yet.** The name is reserved and the release workflow publishes as
+  soon as an `NPM_TOKEN` secret exists; until then the install is the four-line clone above.
 - No tests for the DB repositories or most dashboard pages, and no end-to-end tests.
 - No audit log of administrative actions.
 - No graceful shutdown — `SIGTERM` kills in-flight streams rather than draining them.
