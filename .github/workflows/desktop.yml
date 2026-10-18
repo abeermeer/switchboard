@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - 'electron/**'
+      - 'server.mjs'
       - 'scripts/make-icons.mjs'
       - 'scripts/verify-electron.mjs'
       - 'package.json'
@@ -16,6 +17,7 @@ on:
   pull_request:
     paths:
       - 'electron/**'
+      - 'server.mjs'
       - 'package.json'
   workflow_dispatch:
 
@@ -42,12 +44,14 @@ jobs:
             # Two artefacts to look for, because electron-builder names the
             # installer from productName + version.
             pattern: 'release/*.exe'
+            app: 'release/win-unpacked/Switchboard.exe'
           # Linux doubles as a cheap check that the config is not
           # Windows-specific; AppImage needs no signing toolchain.
           - os: ubuntu-latest
             label: Linux AppImage
             flag: --linux AppImage
             pattern: 'release/*.AppImage'
+            app: 'xvfb-run -a release/linux-unpacked/switchboard --no-sandbox'
 
     steps:
       - uses: actions/checkout@v4
@@ -100,6 +104,30 @@ jobs:
               exit 1
             fi
           done
+
+      # An installer of the right size still proved nothing about whether the
+      # app runs: the gateway child was spawned through the app binary rather
+      # than Node, quit on the single-instance lock, and every build shipped a
+      # window pointing at a dead port. Launch it and wait for the gateway.
+      - name: Launch the packaged app and wait for its gateway
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq xvfb > /dev/null
+          fi
+          ${{ matrix.app }} > app.log 2>&1 &
+          code=000
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7272/api/system/status || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          if [ "$code" != "200" ]; then
+            echo "::error::the packaged app never started its gateway"
+            cat app.log || true
+            exit 1
+          fi
+          echo "packaged app serves its gateway"
 
       - uses: actions/upload-artifact@v4
         with:

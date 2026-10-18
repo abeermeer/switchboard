@@ -192,11 +192,37 @@ if (main.length > 0) {
     ok('renderer hardening flags are set');
   }
 
+  // In a packaged app process.execPath is the app binary, not Node. Spawning it
+  // without this flag starts a second desktop instance instead of the gateway.
+  if (!main.includes("ELECTRON_RUN_AS_NODE: '1'")) {
+    fail('main.cjs spawns the gateway without ELECTRON_RUN_AS_NODE, so it would relaunch the app instead');
+  } else {
+    ok('gateway child runs as Node, not as a second app instance');
+  }
+  if (!main.includes('server.mjs')) {
+    fail('main.cjs does not start server.mjs, so the gateway would skip the socket-level access checks');
+  }
+
   // A window that can navigate anywhere is a browser with Node privileges next
   // to it; the handler is what keeps external links in the real browser.
   if (!main.includes('setWindowOpenHandler')) {
     fail('main.cjs does not guard window.open — external URLs could load in-app');
   }
+}
+
+// ─── The files the gateway needs at runtime have to ship ─────────────────────
+
+if (config !== undefined) {
+  const files = Array.isArray(config.files) ? config.files : [];
+  if (config.asar !== false) {
+    fail('asar must be off: the gateway child needs a real directory as its working directory');
+  }
+  for (const needed of ['server.mjs', 'next.config.ts', '.next/**/*']) {
+    if (!files.includes(needed)) fail(`builder files do not include ${needed}`);
+  }
+  // A blanket exclusion wins over the explicit include and silently drops it.
+  if (files.includes('!**/*.ts')) fail('builder files exclude every .ts file, including next.config.ts');
+  if (problems.length === 0) ok('runtime files ship outside an asar archive');
 }
 
 // ─── Report ─────────────────────────────────────────────────────────────────

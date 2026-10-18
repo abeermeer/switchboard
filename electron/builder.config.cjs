@@ -16,12 +16,17 @@ module.exports = {
     output: 'release',
     buildResources: 'electron/assets',
   },
+  // The gateway runs as a child Node process with the app directory as its
+  // working directory and reads .next from disk. Neither works inside an asar
+  // archive: a process cannot chdir into a file.
+  asar: false,
   files: [
     'electron/**/*',
     '.next/**/*',
     'public/**/*',
     'package.json',
     'next.config.ts',
+    'server.mjs',
     // Next's production server and the app's runtime dependencies must ship;
     // dev tooling must not.
     'node_modules/**/*',
@@ -31,8 +36,10 @@ module.exports = {
     '!node_modules/typescript/**',
     '!node_modules/@types/**',
     '!**/*.map',
-    '!**/*.ts',
-    '!**/*.tsx',
+    // Scoped to node_modules: a blanket `!**/*.ts` also dropped next.config.ts,
+    // which the server loads at startup.
+    '!node_modules/**/*.ts',
+    '!node_modules/**/*.tsx',
   ],
   extraMetadata: {
     main: 'electron/main.cjs',
@@ -58,5 +65,7 @@ module.exports = {
     target: ['AppImage', 'deb'],
     icon: 'electron/assets/icon.png',
     category: 'Development',
+    // Pinned so the CI launch check knows what to run in linux-unpacked/.
+    executableName: 'switchboard',
   },
 };

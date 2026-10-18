@@ -2,6 +2,8 @@
 
 const { app, BrowserWindow, Menu, Tray, shell, ipcMain, clipboard, nativeImage } = require('electron');
 const { spawn } = require('node:child_process');
+const { existsSync } = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 
@@ -80,16 +82,20 @@ async function startServer() {
   port = await findPort(DEFAULT_PORT);
 
   const root = path.join(__dirname, '..');
-  server = spawn(process.execPath, [path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'start', '-p', String(port)], {
+  // In a packaged app process.execPath is the Switchboard binary itself, not
+  // Node. Without ELECTRON_RUN_AS_NODE the spawn launched a second copy of the
+  // desktop app, which lost the single-instance lock and quit, so the gateway
+  // never started.
+  server = spawn(process.execPath, [path.join(root, 'server.mjs')], {
     cwd: root,
     env: {
       ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
       PORT: String(port),
+      SWITCHBOARD_HOST: '127.0.0.1',
       NODE_ENV: 'production',
-      // Packaged builds must write to a real app-data directory, matching
-      // dataDir() in src/lib/db/client.ts.
       SWITCHBOARD_PACKAGED: '1',
-      SWITCHBOARD_DATA_DIR: app.getPath('userData'),
+      SWITCHBOARD_DATA_DIR: dataDir(),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -103,6 +109,29 @@ async function startServer() {
   });
 
   await waitForServer(port);
+}
+
+/**
+ * Where the desktop app keeps its database and master key: the same folder the
+ * CLI uses (bin/lib/dataDir.mjs), so both see one install.
+ *
+ * It used to be Electron's userData, which is named after the npm package. The
+ * rename to switchboard-gateway moved that folder without anyone noticing, so
+ * an existing database there is still honoured rather than appearing lost.
+ */
+function dataDir() {
+  const base =
+    process.platform === 'win32'
+      ? (process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'))
+      : process.platform === 'darwin'
+        ? path.join(os.homedir(), 'Library', 'Application Support')
+        : (process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share'));
+  const shared = path.join(base, 'Switchboard');
+  if (existsSync(path.join(shared, 'switchboard.db'))) return shared;
+
+  const legacy = app.getPath('userData');
+  if (existsSync(path.join(legacy, 'switchboard.db'))) return legacy;
+  return shared;
 }
 
 function stopServer() {
