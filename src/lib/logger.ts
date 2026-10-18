@@ -51,9 +51,9 @@ const MAX_DEPTH = 6;
  * a live key. Applied to every logged value, including nested objects and
  * arrays, so a caller cannot leak by accident.
  */
-export function redact(value: unknown, depth = 0): unknown {
+export function redact(value: unknown, depth = 0, maxDepth = MAX_DEPTH): unknown {
   if (value === null || value === undefined) return value;
-  if (depth > MAX_DEPTH) return '[truncated]';
+  if (depth > maxDepth) return '[truncated]';
 
   if (typeof value === 'string') return redactString(value);
   if (typeof value === 'number' || typeof value === 'boolean') return value;
@@ -69,12 +69,12 @@ export function redact(value: unknown, depth = 0): unknown {
     };
   }
 
-  if (Array.isArray(value)) return value.map((item) => redact(item, depth + 1));
+  if (Array.isArray(value)) return value.map((item) => redact(item, depth + 1, maxDepth));
 
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = SECRET_KEY_PATTERN.test(key) ? REDACTED : redact(inner, depth + 1);
+      out[key] = SECRET_KEY_PATTERN.test(key) ? REDACTED : redact(inner, depth + 1, maxDepth);
     }
     return out;
   }

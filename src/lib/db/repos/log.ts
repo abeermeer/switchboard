@@ -1,3 +1,4 @@
+import type { DatabaseSync } from 'node:sqlite';
 import type {
   Modality,
   RequestLogDetail,
@@ -23,6 +24,9 @@ import {
   type Row,
 } from '@/lib/db/rows';
 import { clamp } from '@/lib/utils';
+
+/** Deep enough for any real request body; still bounded. */
+const PAYLOAD_DEPTH = 64;
 
 const MODALITIES: readonly Modality[] = [
   'chat',
@@ -94,6 +98,22 @@ function toEntry(row: Row): RequestLogEntry {
   };
 }
 
+function addKeySpend(handle: DatabaseSync, apiKeyId: string, ts: number, costUsd: number): void {
+  if (!Number.isFinite(costUsd) || costUsd === 0) return;
+  handle
+    .prepare(
+      `INSERT INTO api_key_spend (api_key_id, month_ts, cost_usd) VALUES (?, ?, ?)
+       ON CONFLICT (api_key_id, month_ts) DO UPDATE SET cost_usd = cost_usd + excluded.cost_usd`,
+    )
+    .run(apiKeyId, utcMonthStart(ts), costUsd);
+}
+
+/** 00:00 UTC on the 1st of the month `ts` falls in. */
+export function utcMonthStart(ts: number): number {
+  const date = new Date(Number.isFinite(ts) ? ts : Date.now());
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+}
+
 export function insertRequestLog(
   entry: RequestLogEntry,
   payloads?: { decision?: RoutingDecision | null; request?: unknown; response?: unknown },
@@ -101,6 +121,17 @@ export function insertRequestLog(
   const usage = entry.usage;
 
   transact((handle) => {
+    // Spend is booked in the same transaction as the row, so a key's budget
+    // and its log can never disagree. A replaced row backs its old cost out
+    // first, so writing the same request twice does not count it twice.
+    const previous = asRow(
+      handle.prepare('SELECT api_key_id, ts, cost_usd FROM request_log WHERE id = ?').get(entry.id),
+    );
+    if (previous && previous.api_key_id !== null && previous.api_key_id !== undefined) {
+      addKeySpend(handle, str(previous.api_key_id), num(previous.ts), -num(previous.cost_usd));
+    }
+    if (entry.apiKeyId !== null) addKeySpend(handle, entry.apiKeyId, entry.ts, entry.costUsd);
+
     handle
       .prepare(
         `INSERT OR REPLACE INTO request_log
@@ -143,9 +174,13 @@ export function insertRequestLog(
     // have it written to disk in plain text and kept for as long as the row
     // lives — and the dashboard's read path is not the only thing that can
     // reach this table.
-    const decision = payloads.decision ? safeStringify(redact(payloads.decision)) : null;
-    const request = safeStringify(redact(payloads.request));
-    const response = safeStringify(redact(payloads.response));
+    // The logger's depth cap guards against cyclic objects in log lines. A
+    // stored payload is parsed JSON and cannot be cyclic, and at depth 6 a tool
+    // schema's leaf values came back as "[truncated]", so a replay sent a
+    // broken schema upstream.
+    const decision = payloads.decision ? safeStringify(redact(payloads.decision, 0, PAYLOAD_DEPTH)) : null;
+    const request = safeStringify(redact(payloads.request, 0, PAYLOAD_DEPTH));
+    const response = safeStringify(redact(payloads.response, 0, PAYLOAD_DEPTH));
     if (decision === null && request === null && response === null) return;
 
     handle
