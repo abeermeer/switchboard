@@ -84,7 +84,7 @@ In practice that captures exactly the right set:
 | Model | Provider | Treated as |
 | --- | --- | --- |
 | `llama-3.1-8b-instant` | Groq | free |
-| `gemini-2.0-flash-lite` | Google | free |
+| `gemini-2.5-flash-lite` | Google | free |
 | `qwen-3-235b-a22b-instruct` | Cerebras | free |
 | `moonshotai/kimi-k2-instruct` | Groq | standard — $1.50, above the threshold |
 | `gemini-2.5-pro` | Google | standard — $3.44, a flagship |

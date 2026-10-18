@@ -103,6 +103,7 @@ const TOOLS: ChatFeature[] = ['tools', 'json_mode'];
 const TOOLS_VISION: ChatFeature[] = ['tools', 'json_mode', 'vision'];
 const TOOLS_REASONING: ChatFeature[] = ['tools', 'json_mode', 'reasoning'];
 const FULL: ChatFeature[] = ['tools', 'json_mode', 'vision', 'reasoning'];
+const ANTHROPIC: ChatFeature[] = ['tools', 'vision', 'reasoning'];
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   // ─── Free-first tier ───────────────────────────────────────────────────────
@@ -174,9 +175,9 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       chat('gemini-2.5-pro', 'Gemini 2.5 Pro', 1_048_576, 65_536, 1.25, 10.0, 90, FULL),
       chat('gemini-2.5-flash', 'Gemini 2.5 Flash', 1_048_576, 65_536, 0.3, 2.5, 180, FULL),
       chat('gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite', 1_048_576, 65_536, 0.1, 0.4, 400, TOOLS_VISION),
-      chat('gemini-2.0-flash', 'Gemini 2.0 Flash', 1_048_576, 8_192, 0.1, 0.4, 250, TOOLS_VISION),
-      chat('gemini-2.0-flash-lite', 'Gemini 2.0 Flash Lite', 1_048_576, 8_192, 0.075, 0.3, 350, TOOLS_VISION),
-      embedding('text-embedding-004', 'Text Embedding 004', 2_048, 0),
+      // gemini-2.0-flash and -flash-lite were shut down on 2026-06-01 and
+      // text-embedding-004 on 2026-01-14 (Gemini API release notes). Listed,
+      // they ranked near the top of the free ladder and 404'd on every call.
       embedding('gemini-embedding-001', 'Gemini Embedding 001', 2_048, 0.15),
       image('imagen-4.0-generate-001', 'Imagen 4', 0, 40),
     ],
@@ -189,7 +190,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     authScheme: 'bearer',
     modelsPath: '/models',
     extraHeaders: {
-      'HTTP-Referer': 'https://github.com/switchboard-gateway/switchboard',
+      'HTTP-Referer': 'https://github.com/abeermeer/switchboard',
       'X-Title': 'Switchboard',
     },
     docsUrl: 'https://openrouter.ai/docs/quickstart',
@@ -504,13 +505,21 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     accent: '#D97757',
     requiresKey: true,
     blurb: 'Claude. Long-horizon agentic work, prompt caching, and assistant prefill.',
+    // Prices, windows and retirement dates from platform.claude.com (pricing,
+    // models overview, model deprecations), read 2026-10-18. Claude 3.7 Sonnet
+    // and 3.5 Haiku retired 2026-02-19 and Opus 4.1 on 2026-08-05; they are gone
+    // rather than left to 404. Sonnet 4.5 is deprecated and retires 2026-11-30.
+    //
+    // No json_mode: the Anthropic adapter does not translate response_format,
+    // so a JSON-mode request routed here had the setting silently dropped.
+    // Haiku 5.5 is left out because its price steps up past 100K-token prompts,
+    // which a single per-MTok figure cannot represent.
     models: [
-      chat('claude-opus-4-5-20251101', 'Claude Opus 4.5', 200_000, 64_000, 5.0, 25.0, 60, [...FULL, 'prefill']),
-      chat('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', 200_000, 64_000, 3.0, 15.0, 75, [...FULL, 'prefill']),
-      chat('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 200_000, 64_000, 1.0, 5.0, 140, [...FULL, 'prefill']),
-      chat('claude-opus-4-1-20250805', 'Claude Opus 4.1', 200_000, 32_000, 15.0, 75.0, 40, [...FULL, 'prefill']),
-      chat('claude-3-7-sonnet-20250219', 'Claude 3.7 Sonnet', 200_000, 64_000, 3.0, 15.0, 70, [...FULL, 'prefill']),
-      chat('claude-3-5-haiku-20241022', 'Claude 3.5 Haiku', 200_000, 8_192, 0.8, 4.0, 160, [...TOOLS_VISION, 'prefill']),
+      chat('claude-opus-5-5', 'Claude Opus 5.5', 1_000_000, 128_000, 4.0, 20.0, 60, ANTHROPIC),
+      chat('claude-sonnet-5-5', 'Claude Sonnet 5.5', 1_000_000, 128_000, 2.0, 10.0, 80, ANTHROPIC),
+      chat('claude-opus-4-5-20251101', 'Claude Opus 4.5', 200_000, 64_000, 5.0, 25.0, 60, [...ANTHROPIC, 'prefill']),
+      chat('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', 200_000, 64_000, 3.0, 15.0, 75, [...ANTHROPIC, 'prefill']),
+      chat('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 200_000, 64_000, 1.0, 5.0, 140, [...ANTHROPIC, 'prefill']),
     ],
   },
   {

@@ -405,8 +405,8 @@ describe('usage/cost', () => {
       it('never reports a negative saving for a model above the baseline', () => {
         // Quality-first routing genuinely picks models that cost more. That is a
         // real outcome, but it is not a negative saving.
-        const settled = settleRequest('anthropic', 'claude-opus-4-1-20250805', ONE_MTOK_EACH);
-        expect(settled.costUsd).toBeCloseTo(90, 10);
+        const settled = settleRequest('anthropic', 'claude-opus-5-5', ONE_MTOK_EACH);
+        expect(settled.costUsd).toBeCloseTo(24, 10);
         expect(settled.savedUsd).toBe(0);
       });
 

@@ -16,7 +16,7 @@ import {
  * mistranslation silently drops the setting instead of erroring.
  */
 
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'gemini-2.5-flash';
 
 function req(body: Record<string, unknown>, stream = false) {
   return requestFor('google', body, { model: MODEL, stream });
@@ -73,7 +73,7 @@ describe('google adapter', () => {
       upstream = stubAdapterUpstream([generateOk()]);
       await googleAdapter.execute(
         requestFor('google', { messages: [{ role: 'user', content: 'hi' }] }, {
-          model: 'models/gemini-2.0-flash',
+          model: 'models/gemini-2.5-flash',
         }),
       );
 
@@ -556,7 +556,7 @@ describe('google adapter', () => {
       upstream = stubAdapterUpstream([{ json: { embedding: { values: [0.1, 0.2, 0.3] } } }]);
       const res = await googleAdapter.execute(
         requestFor('google', { input: 'hello' }, {
-          model: 'text-embedding-004',
+          model: 'gemini-embedding-001',
           modality: 'embeddings',
         }),
       );
@@ -577,7 +577,7 @@ describe('google adapter', () => {
       ]);
       const res = await googleAdapter.execute(
         requestFor('google', { input: ['a', 'b'] }, {
-          model: 'text-embedding-004',
+          model: 'gemini-embedding-001',
           modality: 'embeddings',
         }),
       );
