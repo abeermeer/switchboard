@@ -18,6 +18,88 @@ tag, so a manual one blocks the real release.
 
 ---
 
+## 2026-10-18: A full review, and fixes for what it found
+
+The user asked whether the repository was ready to leave as finished. Typecheck, 1,036
+tests and the build were all green; the review still found real bugs, because the green
+checks never connected from another machine, never seeded the routing policies a real
+install creates, never built the Docker image, never launched the desktop app, and never
+started the globally installed command. Each item below was reproduced before it was
+fixed (against a running build, or with a test that failed first).
+
+### Security
+
+- **Anyone on the network could take over the dashboard.** `next start` listens on every
+  interface; "local" was decided from `X-Forwarded-For`, which Next only fills in when the
+  client did not send one, so `X-Forwarded-For: 127.0.0.1` from another machine minted a
+  working API key; and the `/dashboard/*` pages had no guard at all.
+  `server.mjs` now serves the app on `127.0.0.1` by default and stamps a verdict read off
+  the socket, `src/proxy.ts` gates every page and API route, and a relayed request counts
+  as remote.
+- **DNS rebinding and CSRF** reached the loopback-bound server through the user's own
+  browser. Only IP literals, `localhost` and `SWITCHBOARD_ALLOWED_HOSTS` are answered;
+  cross-origin admin writes and unlisted browser origins on `/v1` are refused.
+- The dashboard token existed but was never shown anywhere. `sb token` prints it,
+  `/dashboard?token=` swaps it for an HttpOnly cookie, and only a local shell can read or
+  rotate it. With no API key yet, the gateway runs open for local callers only.
+- **"Allowed policies" on a key was stored and never enforced.** Now checked on every
+  gateway request.
+- The database (every logged prompt) was world-readable under the default umask; it and its
+  WAL/SHM files are now 0600.
+
+### Broken features
+
+- **`provider/model` pins fanned out to the whole fleet** once the default `auto` policy
+  existed, which is every real install. Resolution now goes policy slug, pin, catalog model,
+  then the default; an unrecognised model still routes as auto but is flagged with
+  `x-switchboard-substituted`.
+- **The Docker image did not build** (a missing `public/`, and `--omit=optional` dropped
+  Tailwind's and Next's native binaries). Built and run for real.
+- **The desktop app could not start its gateway**: in a packaged app `process.execPath` is
+  the app, so the spawn relaunched Switchboard, which quit on the single-instance lock.
+  Fixed with `ELECTRON_RUN_AS_NODE` and asar off; the Linux build was launched under Xvfb
+  and answered in about 8 seconds. `desktop.yml` now launches both platforms' builds.
+- **A fresh global install could not start**: the caret range on `next` pulled 16.4.2,
+  which could not read the 16.2.11 build in the tarball. `next`/`react` are pinned, and
+  `verify:install` now boots the installed command instead of only running `--version`.
+- The README's install (`npm install -g .`) kept the database inside the clone, contrary to
+  what it said. The CLI now defaults to the OS app-data folder and warns about data left
+  inside a package. The desktop app uses the same folder (the npm rename had silently moved
+  its own).
+- Claude Code via `ANTHROPIC_BASE_URL` was documented but there is no `/v1/messages`;
+  `/v1/moderations` and `/v1/audio/speech` had no backing model. Moderation now uses
+  OpenAI's free `omni-moderation-latest`; the other two are documented as unsupported.
+
+### Money
+
+- Reasoning tokens were billed twice for OpenAI-shaped usage (an o4-mini request 64% high).
+- A client disconnect did not stop the fallback walk: it was charged to a healthy breaker
+  and the next candidates got billed calls for nobody.
+- Playground and replay requests were never logged or counted toward usage or budgets.
+- Per-key budgets were summed from `request_log`, so log retention and "clear logs" reset
+  them. Spend now lives in `api_key_spend` (migration 3).
+- The routing simulator consumed half-open trial slots; expansion now uses a read-only check
+  and the executor claims the slot right before sending.
+- All candidates temporarily out now answers 503 rather than 404; ordinary 400s are no
+  longer misread as `context_length`.
+
+### Catalog
+
+Changed only where a provider page confirmed it: retired Claude 3.7 Sonnet, 3.5 Haiku and
+Opus 4.1 removed; Claude Opus 5.5 and Sonnet 5.5 added from Anthropic's pricing and models
+pages; shut-down Gemini 2.0 Flash/Flash-Lite and `text-embedding-004` removed; Claude no
+longer claims `json_mode`, which its adapter cannot translate.
+
+### Still open
+
+- DeepSeek's pricing (moved to V4 with peak/off-peak rates), the Hyperbolic and Fireworks
+  image endpoints, and Google's free-tier quotas could not be checked from this session.
+- No `/v1/messages`; the known gaps in [CLAUDE.md](CLAUDE.md#known-gaps) otherwise stand.
+- The version was not bumped: merging this does not cut a release until `package.json`
+  changes on `main`.
+
+---
+
 ## 2026-07-30 (later) — The install instruction was pointing at someone else's package
 
 The user ran the README's first command and got

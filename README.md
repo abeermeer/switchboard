@@ -1,7 +1,7 @@
 # Switchboard
 
 [![CI](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1035-3ecf8e.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-1111-3ecf8e.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.13-f0912f.svg)](https://nodejs.org)
 
@@ -91,7 +91,7 @@ That's it. The dashboard is on **http://localhost:7272**, the gateway on
 Your database and encryption key live in your OS application-data directory
 (`%APPDATA%\Switchboard`, `~/Library/Application Support/Switchboard`, or
 `~/.local/share/Switchboard`), so reinstalling, upgrading or deleting the clone never
-touches them. (Installs from before v0.4.2 kept them in `<clone>/data`; `sb start` keeps
+touches them. (Installs up to v0.4.1 kept them in `<clone>/data`; `sb start` keeps
 using that folder if it finds a database there, and tells you to move it.)
 
 The gateway listens on `127.0.0.1` only. `sb start --host 0.0.0.0` puts it on your
@@ -460,7 +460,8 @@ without handing over `ipcRenderer`, and `contextIsolation` / `sandbox` are still
 expensive half is a real `electron-builder` run on Windows and Linux in
 [desktop.yml](.github/workflows/desktop.yml), which also asserts the installer is larger
 than 20 MB — electron-builder exits 0 having shipped only the shell if the `files` globs are
-wrong.
+wrong. It then launches the packaged app and waits for its gateway to answer, since an
+installer of the right size once shipped a shell that could not start its server.
 
 ---
 
@@ -476,7 +477,8 @@ npm run verify:install # pack, install globally, run the command
 ```
 
 `verify:install` is the check that matters before a release: it packs the tarball, installs
-it into a throwaway global prefix, and runs `switchboard --version` and `sb --version`. Every
+it into a throwaway global prefix, runs `switchboard --version` and `sb --version`, and then
+starts the installed gateway and waits for it to answer. Every
 other check in CI runs against the repository, so none of them could tell that the published
 install instruction pointed at a different package entirely.
 
@@ -493,7 +495,7 @@ contribution workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 ### Tests
 
 ```bash
-npm run test:run     # ~1,035 tests
+npm run test:run     # ~1,111 tests
 npm run test:ci      # with coverage
 ```
 
@@ -538,12 +540,12 @@ Pre-1.0, and specific about what that means.
 
 An external audit put it at **7.2/10** — strong on architecture, resilience and type
 safety, with test coverage scored **0/10** as the single largest gap, alongside five
-smaller findings. A second pass raised four more once those were closed. All ten are now
+smaller findings. Later passes raised more once those were closed. Every finding below is
 closed:
 
 | Finding | Resolution |
 | --- | --- |
-| No test suite | 1,035 tests; the routing core at 95–100% |
+| No test suite | 1,111 tests; the routing core at 95–100% |
 | Rate limiting reset on restart | Persisted in SQLite, counted per second so it stays cheap on the hot path |
 | `/v1` sent `Access-Control-Allow-Origin: *` | No CORS by default; explicit origin allowlist |
 | No structured logging | JSON logs with a tested redaction layer |
@@ -556,6 +558,12 @@ closed:
 | Desktop packaging unverified beyond local dev | `npm run verify:electron` on every CI leg, plus a real `electron-builder` run on Windows and Linux |
 | `npm install -g switchboard` installed someone else's package | Renamed to `switchboard-gateway`; CI now checks the registry name and installs the packed tarball to prove the command works |
 | `/api/system/status` reported a hardcoded `0.1.0` | Read from the manifest, with a test pinning it |
+| Anyone on the network could take over the dashboard (spoofable `X-Forwarded-For`, unguarded pages, no Host or Origin checks) | `server.mjs` binds loopback and reads the caller from the socket; `src/proxy.ts` guards every page; DNS rebinding and cross-site writes refused |
+| "Allowed policies" on an API key was never enforced | Checked on every gateway request |
+| `provider/model` pins fanned out to the whole fleet once the default policy existed | Resolution order fixed; tests now seed the real policies |
+| Docker image did not build; desktop app could not start its gateway | Both fixed and launched for real; desktop CI now waits for the packaged gateway to answer |
+| A fresh global install pulled a newer Next than the shipped build and could not start | `next`/`react` pinned; `verify:install` boots the installed command |
+| Reasoning tokens billed twice; disconnects still spent money; playground and replay spend uncounted; budgets reset by log pruning | Each fixed with a test that failed first |
 
 Writing the tests found three real bugs that had survived every manual check: a non-ASCII
 character in a provider's error message crashed the response instead of returning the
@@ -571,7 +579,13 @@ preferred it.
 - No audit log of administrative actions.
 - No graceful shutdown — `SIGTERM` kills in-flight streams rather than draining them.
 - `context_length` counts toward the circuit breaker, unlike `bad_request`, so a client
-  looping oversized prompts can open the breaker on a healthy provider.
+  looping oversized prompts can open the breaker on a healthy provider. (Ordinary 400s no
+  longer get misread as `context_length`.)
+- Some catalog entries could not be checked against provider pages yet: DeepSeek's
+  pricing (now V4 models with peak and off-peak rates), the Hyperbolic and Fireworks image
+  endpoints, and Google's free-tier quotas.
+- No Anthropic-protocol endpoint (`/v1/messages`), so Claude Code and other
+  `ANTHROPIC_BASE_URL` clients cannot use the gateway.
 - A half-open breaker trial that gets a 429 never reports back, so the trial slot stays
   held until its window expires.
 

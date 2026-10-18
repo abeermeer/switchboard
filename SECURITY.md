@@ -30,8 +30,23 @@ sees a four-character hint.
 and cannot be recovered. These are high-entropy random secrets, so a slow KDF would buy
 nothing and cost a hash on every request.
 
-**The management API.** Refuses any request that is not from loopback unless
-`SWITCHBOARD_ALLOW_REMOTE=1` is set *and* the request carries the dashboard token.
+**Network exposure.** `server.mjs` listens on `127.0.0.1` unless `SWITCHBOARD_HOST` says
+otherwise. Whether a caller is local is read from the socket, not from `X-Forwarded-For`,
+and a request relayed by any proxy counts as remote. (Before this, the forwarded header
+decided it, and a remote client that sent `X-Forwarded-For: 127.0.0.1` got full admin.)
+
+**The dashboard and management API.** Every page and admin route, enforced in
+`src/proxy.ts` and again in each handler, refuses a remote caller unless it presents the
+dashboard token (header, or the HttpOnly cookie set by `/dashboard?token=`) or
+`SWITCHBOARD_ALLOW_REMOTE=1` is set. Only a shell on the host can read or rotate the token
+(`sb token`).
+
+**Attacks from your own browser.** Both arrive from `127.0.0.1`, so the localhost check
+cannot see them:
+- *DNS rebinding:* only IP addresses, `localhost` and names in `SWITCHBOARD_ALLOWED_HOSTS`
+  are answered, so a page that re-points its own domain at your machine is refused.
+- *Cross-site requests:* state-changing admin requests from another origin or site are
+  refused, and `/v1` refuses browser origins not listed in `SWITCHBOARD_CORS_ORIGINS`.
 
 ## What is not protected
 
@@ -44,9 +59,10 @@ Be clear-eyed about these:
   decrypt your provider credentials. Its `0600` permissions are the only barrier, and on
   Windows those are advisory.
 - **There is no rate limit on the dashboard**, only on gateway API keys.
-- **The gateway runs open until you create an API key.** This is deliberate — a fresh
-  install has to be usable before you have visited the dashboard — but it means an
-  unauthenticated gateway on a shared machine will serve anyone who finds it.
+- **The gateway runs open until you create an API key, for this machine.** This is
+  deliberate, so a fresh install is usable before you have visited the dashboard. Remote
+  callers always need a key. But any other user or process on the same machine can use an
+  open gateway, so create a key on a shared machine.
 
 ## Deployment
 

@@ -16,15 +16,15 @@ architecture from there.
 ## Commands
 
 ```bash
-npm run dev          # dev server on :7272
+npm run dev          # dev server on 127.0.0.1:7272
 npm run typecheck    # tsc --noEmit — must be clean before any commit
-npm run test:run     # vitest, ~1,035 tests, must be green before any commit
+npm run test:run     # vitest, ~1,111 tests, must be green before any commit
 npm run build        # production build; CI runs this on 4 platform/version combos
-npm start            # serve the production build
+npm start            # serve the production build through server.mjs
 npm run icons            # regenerate the desktop icons from the product mark
 npm run verify:electron  # structural check on the desktop packaging; runs in CI
 npm run verify:name      # the npm name still resolves to this repository
-npm run verify:install   # pack, install to a temp global prefix, run the command
+npm run verify:install   # pack, install to a temp global prefix, boot the command
 node bin/sb.mjs doctor   # diagnose a local install
 ```
 
@@ -35,7 +35,10 @@ place to land. Do not lower this floor without checking that flag history again.
 
 ## Architecture in one paragraph
 
-A request enters at `src/app/v1/*`, goes through the shared pipeline in
+`server.mjs` is the production entry (CLI, desktop, Docker, `npm start`): it binds
+`127.0.0.1` unless `SWITCHBOARD_HOST` says otherwise and stamps each request with a
+local/remote verdict read off the socket. `src/proxy.ts` gates every page and API route on
+it. A request enters at `src/app/v1/*`, goes through the shared pipeline in
 `src/lib/api/handler.ts` (parse → validate → authenticate → route → respond → log), and the
 routing itself is three steps in `src/lib/router/`: `candidates.ts` expands the client's
 `model` string into every connection+model pair that could serve it, `score.ts` ranks them
@@ -57,6 +60,18 @@ These are load-bearing. Breaking one produces a bug that typechecks.
 - **Never import a server module from a `'use client'` component.** Anything touching
   `node:sqlite`, `node:crypto`, or `node:fs` is server-only. This fails at build, not at
   typecheck.
+- **Production runs through `server.mjs`, never bare `next start`.** Who counts as local
+  comes from its socket verdict (`x-switchboard-client`, trusted only when
+  `SWITCHBOARD_SERVER=1`, which only that process sets). Without it the app falls back to
+  `X-Forwarded-For`, which is safe only for `next dev` and tests, bound to loopback.
+- **Every management handler calls `guard()`**, even though `src/proxy.ts` runs the same
+  gate first. A handler reachable without the proxy must not be an open door.
+- **`next`, `react` and `react-dom` are pinned exactly.** The package ships a prebuilt
+  `.next`, and a global install ignores the lockfile; a caret range pulled a newer Next that
+  could not read the build. Bump them together with a rebuild.
+- **`TokenUsage.completionTokens` includes reasoning tokens.** Adapters fold separately
+  reported thinking into it at normalization; cost code must never add `reasoningTokens` on
+  top.
 - **Route handlers that touch the DB** need `export const runtime = 'nodejs'` and
   `export const dynamic = 'force-dynamic'`.
 - **Next 16 route params are async**: `{ params }: { params: Promise<{ id: string }> }`.
@@ -85,8 +100,18 @@ so `text-${tone}` never reaches the stylesheet — write the branches out.
 
 Do not "fix" these:
 
-- **The gateway runs unauthenticated until the first API key exists.** A fresh install has
-  to be usable before the user has opened the dashboard.
+- **The gateway runs unauthenticated until the first API key exists, for local callers
+  only.** A fresh install has to be usable before the user has opened the dashboard. Remote
+  callers need a key regardless, unless `SWITCHBOARD_ALLOW_REMOTE` is set.
+- **A request relayed by any proxy counts as remote**, even from 127.0.0.1. A reverse proxy
+  on the same machine would otherwise make the whole internet look like localhost.
+- **Only IP literals, `localhost` and `SWITCHBOARD_ALLOWED_HOSTS` are answered**, and
+  writes from another origin are refused. That is the DNS rebinding and CSRF defence for a
+  loopback-bound server; both attacks arrive from 127.0.0.1.
+- **The default policy applies only to requests that named nothing recognisable.** A policy
+  slug, a `provider/model` pin or a catalog model id bypasses it. An unrecognised model
+  still routes as "auto" (tools with hard-coded model names rely on it) but gets an
+  `x-switchboard-substituted` header.
 - **`bad_request` (400) does not trigger a fallback.** A malformed body produces the same
   400 on every provider; retrying five times makes the client wait five times as long for
   the same answer.
@@ -139,7 +164,7 @@ npm run test:run     # once
 npm run test:ci      # with coverage
 ```
 
-~1,035 tests in `tests/`, on vitest. Structure:
+~1,111 tests in `tests/`, on vitest. Structure:
 
 - `tests/setup.ts` repoints `SWITCHBOARD_DATA_DIR` at a temp directory **before any module
   is imported**. This is load-bearing: the master key and the DB handle cache in module
@@ -147,6 +172,10 @@ npm run test:ci      # with coverage
   developer's real key.
 - `tests/helpers/db.ts` — `freshDb()` per test, `dropDb()` after. Any suite that writes
   rows must use them; tests must not depend on ordering.
+- A fresh test database has **no routing policies**, but every real install seeds `auto`
+  (the default), `free-only`, `fast` and `quality` on first load. Routing tests that should
+  hold on a real install call `ensureSeedCombos()`. Provider pinning was broken for every
+  user while the suite passed, because it never did.
 - `tests/helpers/upstream.ts` — stubs global `fetch`, which is where every adapter reaches
   the network. The plan array is consumed one entry per upstream call, so
   `[providerError(429), chatOk()]` describes a fallback. **Nothing in the suite may reach a
@@ -223,6 +252,12 @@ Be honest about these rather than papering over them:
   DB repositories and most dashboard pages have none, and there are no end-to-end tests.
 - **`context_length` counts toward the breaker threshold**, unlike `bad_request`. A client
   looping oversized prompts can open the breaker on a healthy connection.
+- **Some catalog entries are unverified against provider pages**: DeepSeek's pricing (V4
+  models with peak and off-peak rates since 2026-08), the Hyperbolic and Fireworks image
+  endpoints (possibly not OpenAI-compatible), and Google's free-tier quotas. Their pages
+  could not be read from the session that found this.
+- **No `/v1/messages`.** Anthropic-protocol clients (Claude Code via `ANTHROPIC_BASE_URL`)
+  cannot use the gateway.
 - **A half-open trial that gets a 429 never reports back** — the trial slot stays held
   until its window expires.
 - **No audit log of admin actions** — key creation, connection changes and token rotation

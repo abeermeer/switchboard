@@ -7,15 +7,24 @@ How a request moves through Switchboard, module by module.
 ```
 POST /v1/chat/completions
   │
+  ├─ server.mjs
+  │    binds 127.0.0.1 by default; stamps a local/remote verdict read off the
+  │    socket (a request relayed by any proxy is remote)
+  │
+  ├─ src/proxy.ts
+  │    refuses a Host that could be DNS rebinding; gates every dashboard page and
+  │    admin route on local / dashboard token / SWITCHBOARD_ALLOW_REMOTE
+  │
   ├─ src/app/v1/chat/completions/route.ts
-  │    derives required features from the body (tools → 'tools', an image part
-  │    → 'vision') and hands off to the shared pipeline
+  │    derives required features from the body (src/lib/api/features.ts: tools →
+  │    'tools', an image part → 'vision') and hands off to the shared pipeline
   │
   ├─ src/lib/api/handler.ts · handleModality()
   │    parse → validate (zod) → authenticate → route() → respond → log
   │
   ├─ src/lib/api/respond.ts · authenticate()
-  │    bearer token → key lookup → rate limit → budget check
+  │    Host and Origin checks → bearer token → key lookup → rate limit;
+  │    then the key's allowed policies; no key yet = open, for local callers only
   │
   ├─ src/lib/router/index.ts · route()
   │    │
@@ -25,8 +34,10 @@ POST /v1/chat/completions
   │    └─ src/lib/router/execute.ts · executeRoute()
   │         └─ src/lib/providers/adapters/* · adapter.execute()
   │
-  └─ src/lib/db/repos/log.ts + usage.ts
-       one log row, one decision trace, one hourly usage bucket
+  └─ src/lib/api/handler.ts · recordRequest() → src/lib/db/repos/log.ts + usage.ts
+       one log row, one decision trace, one hourly usage bucket, and the key's
+       month-to-date spend (api_key_spend). The playground and replay go through
+       the same function.
 ```
 
 ## Layers

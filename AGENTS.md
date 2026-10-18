@@ -28,7 +28,7 @@ Ubuntu and Windows.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict
-npm run test:run    # vitest, ~1,035 tests
+npm run test:run    # vitest, ~1,111 tests
 npm run build
 ```
 
@@ -100,7 +100,14 @@ Each of these fails silently or at build time rather than at typecheck:
 
 ## Deliberate behaviour — do not "fix"
 
-- Gateway runs unauthenticated until the first API key is created.
+- Gateway runs unauthenticated until the first API key is created, for local callers only.
+- Production goes through `server.mjs`, never bare `next start`; "local" comes from its
+  socket verdict, and a request relayed by any proxy counts as remote.
+- Only IP literals, `localhost` and `SWITCHBOARD_ALLOWED_HOSTS` are answered, and
+  cross-origin writes to the admin API are refused (DNS rebinding and CSRF).
+- `next`, `react` and `react-dom` are pinned exactly: the package ships a prebuilt `.next`.
+- `TokenUsage.completionTokens` already includes reasoning; never add `reasoningTokens` on
+  top.
 - `bad_request` (400) does not trigger a fallback.
 - A stream that has emitted a byte is never retried.
 - Free-tier models settle at $0 (`settleRequest` in `src/lib/usage/cost.ts`).
