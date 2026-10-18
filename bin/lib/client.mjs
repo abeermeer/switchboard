@@ -12,9 +12,16 @@ export async function api(path, options = {}) {
 
   let response;
   try {
+    // SWITCHBOARD_TOKEN lets `--url` point at a gateway on another machine;
+    // locally the request is admitted as coming from this host.
+    const token = process.env.SWITCHBOARD_TOKEN?.trim();
     response = await fetch(url, {
       ...options,
-      headers: { 'content-type': 'application/json', ...(options.headers ?? {}) },
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { 'x-switchboard-token': token } : {}),
+        ...(options.headers ?? {}),
+      },
     });
   } catch (err) {
     const cause = err?.cause?.code ?? err?.code ?? '';
@@ -36,7 +43,9 @@ export async function api(path, options = {}) {
   }
 
   if (!response.ok) {
-    const message = typeof body === 'object' && body !== null ? (body.error ?? body.message) : body;
+    const raw = typeof body === 'object' && body !== null ? (body.error ?? body.message) : body;
+    // Admin errors are a string; the gateway's OpenAI envelope nests it.
+    const message = typeof raw === 'object' && raw !== null ? raw.message : raw;
     console.error(pc.red(`Request failed (${response.status}): ${message ?? 'unknown error'}`));
     process.exit(1);
   }

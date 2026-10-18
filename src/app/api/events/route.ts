@@ -1,7 +1,7 @@
 import { snapshotAll } from '@/lib/resilience/breaker';
 import { listRequestLogs } from '@/lib/db/repos/log';
 import { usageTotals } from '@/lib/db/repos/usage';
-import { requireLocalOrToken } from '@/lib/auth/session';
+import { adminGate } from '@/lib/auth/access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ const TICK_MS = 2_000;
  * hold eight sockets and run eight copies of this query loop.
  */
 export function GET(req: Request): Response {
-  const denied = requireLocalOrToken(req);
+  const denied = adminGate(req);
   if (denied !== null) return denied;
 
   const encoder = new TextEncoder();

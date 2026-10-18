@@ -6,7 +6,6 @@ import { createInterface } from 'node:readline';
 import { existsSync, accessSync, constants, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 import net from 'node:net';
 import pc from 'picocolors';
 import { api, baseUrl } from './lib/client.mjs';
@@ -21,26 +20,6 @@ function readPackageVersion() {
     return String(JSON.parse(raw).version ?? '0.0.0');
   } catch {
     return '0.0.0';
-  }
-}
-
-/**
- * Locate Next's CLI entry through node's own resolver.
- *
- * Hardcoding `<root>/node_modules/next` only works for a repo checkout. On a
- * global install npm hoists dependencies, so next can sit anywhere up the tree
- * — resolving it is the difference between `npm i -g switchboard-gateway` working and
- * failing with ENOENT on a path the user cannot see.
- */
-function resolveNextBin() {
-  try {
-    return createRequire(import.meta.url).resolve('next/dist/bin/next');
-  } catch {
-    const local = join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
-    if (existsSync(local)) return local;
-    console.error(pc.red('Could not find the Next.js runtime.'));
-    console.error(pc.dim('  Reinstall Switchboard:  npm install -g switchboard-gateway'));
-    process.exit(1);
   }
 }
 
@@ -64,10 +43,16 @@ program
 program
   .command('start')
   .description('start the gateway and dashboard')
-  .option('-p, --port <port>', 'port to listen on', '7272')
+  .option('-p, --port <port>', 'port to listen on', process.env.PORT ?? '7272')
+  .option(
+    '-H, --host <host>',
+    'interface to listen on (0.0.0.0 exposes it to your network)',
+    process.env.SWITCHBOARD_HOST ?? '127.0.0.1',
+  )
   .option('--open', 'open the dashboard once it is ready')
   .action(async (options) => {
     const port = Number(options.port);
+    const host = String(options.host);
 
     if (!existsSync(join(root, '.next'))) {
       fail('No production build found.');
@@ -80,11 +65,14 @@ program
     // the next `npm update -g` would delete it along with every stored key.
     const dataDir = resolveDataDir(root);
 
-    banner(port, dataDir);
+    banner(port, dataDir, host);
 
-    const child = spawn(process.execPath, [resolveNextBin(), 'start', '-p', String(port)], {
+    // server.mjs rather than `next start`: it binds the interface given here
+    // (loopback unless told otherwise) and reads the caller's real address off
+    // the socket, which `next start` cannot give the app.
+    const child = spawn(process.execPath, [join(root, 'server.mjs')], {
       cwd: root,
-      env: { ...process.env, PORT: String(port), SWITCHBOARD_DATA_DIR: dataDir },
+      env: { ...process.env, PORT: String(port), SWITCHBOARD_HOST: host, SWITCHBOARD_DATA_DIR: dataDir },
       stdio: 'inherit',
     });
 
@@ -94,6 +82,23 @@ program
     }
 
     child.on('exit', (code) => process.exit(code ?? 0));
+  });
+
+// ── token ────────────────────────────────────────────────────────────────────
+
+program
+  .command('token')
+  .description('print the dashboard token for remote browsers (--rotate to reset it)')
+  .option('--rotate', 'issue a new token and invalidate the old one')
+  .action(async (options) => {
+    const { token } = await api('/api/system/token', { method: options.rotate === true ? 'POST' : 'GET' });
+    console.log('');
+    if (options.rotate === true) ok('Token rotated. Browsers holding the old one are signed out.');
+    console.log(`  ${pc.bold(pc.yellow(token))}`);
+    console.log('');
+    info('Open /dashboard?token=<token> once from the remote browser, or send it in the');
+    info('x-switchboard-token header. Reading it only works from this machine.');
+    console.log('');
   });
 
 // ── status ───────────────────────────────────────────────────────────────────

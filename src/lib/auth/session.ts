@@ -5,7 +5,7 @@ import { asRow, str } from '@/lib/db/rows';
 /**
  * Dashboard auth.
  *
- * Switchboard binds to 127.0.0.1 by default, so anything that can reach the
+ * server.mjs binds 127.0.0.1 by default, so anything that can reach the
  * dashboard already has the user's shell and there is nothing left to protect.
  * Auth only exists for the case where the operator deliberately exposes the
  * port, and it is a single bearer token rather than accounts because there is
@@ -14,7 +14,18 @@ import { asRow, str } from '@/lib/db/rows';
 
 const TOKEN_KEY = 'dashboard_token';
 const TOKEN_BYTES = 24;
-const TOKEN_HEADER = 'x-switchboard-token';
+export const TOKEN_HEADER = 'x-switchboard-token';
+
+/**
+ * Set on the browser by the `?token=` handoff in src/proxy.ts, so a remote
+ * dashboard keeps working after the first page load without the token sitting
+ * in every URL.
+ */
+export const TOKEN_COOKIE = 'sb_dashboard_token';
+
+/** Stamped by server.mjs from the socket; see `behindSwitchboardServer`. */
+export const CLIENT_HEADER = 'x-switchboard-client';
+export const PEER_HEADER = 'x-switchboard-peer';
 
 export function isRemoteAccessAllowed(): boolean {
   const raw = process.env.SWITCHBOARD_ALLOW_REMOTE?.trim().toLowerCase();
@@ -50,20 +61,48 @@ function writeToken(): string {
 }
 
 /**
+ * Whether server.mjs is the process serving this request.
+ *
+ * It sets this variable on itself before Next loads, and it overwrites the
+ * client and peer headers on every request with what it read off the socket.
+ * A client can send those headers, but it cannot set an environment variable
+ * in this process, which is what makes them trustworthy here and nowhere else.
+ */
+function behindSwitchboardServer(): boolean {
+  return process.env.SWITCHBOARD_SERVER === '1';
+}
+
+/**
  * The address the request came from, or null when nothing claims one.
  *
- * Next.js route handlers get a WHATWG Request with no socket attached, so the
- * forwarded header is the only signal available. Its absence means no proxy
- * touched the request, which for a loopback-bound server means it is local.
+ * Next.js route handlers get a WHATWG Request with no socket attached. Behind
+ * server.mjs the socket address arrives in the peer header. Anywhere else
+ * (`next dev`, the test suite) the forwarded header is the only signal, and it
+ * is only safe because those run bound to loopback.
  */
 export function clientAddress(req: Request): string | null {
+  if (behindSwitchboardServer()) {
+    const peer = req.headers.get(PEER_HEADER)?.trim();
+    return peer ? peer : null;
+  }
   const forwarded = req.headers.get('x-forwarded-for');
   if (!forwarded) return null;
   const first = forwarded.split(',')[0]?.trim();
   return first ? first : null;
 }
 
+/**
+ * Whether the request came from this machine.
+ *
+ * The forwarded header used to decide this everywhere, and Next only fills it
+ * in when the client did not send one, so `X-Forwarded-For: 127.0.0.1` from
+ * anywhere on the network was full admin. Behind server.mjs the verdict comes
+ * from the socket instead, and a request relayed by any proxy counts as remote,
+ * because a reverse proxy on this machine would otherwise make the whole
+ * internet look like localhost.
+ */
 export function isLocalRequest(req: Request): boolean {
+  if (behindSwitchboardServer()) return req.headers.get(CLIENT_HEADER) === 'local';
   const address = clientAddress(req);
   return address === null || isLoopback(address);
 }
@@ -80,11 +119,14 @@ function isLoopback(address: string): boolean {
   // IPv4-mapped IPv6, e.g. "::ffff:127.0.0.1".
   if (host.startsWith('::ffff:')) host = host.slice(7);
 
-  if (host === 'localhost' || host === '::1' || host === '::') return true;
+  if (host === 'localhost' || host === '::1') return true;
   return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
-/** Bearer header, dedicated header, or ?token= for EventSource, which cannot set headers. */
+/**
+ * Bearer header, dedicated header, the cookie the dashboard handoff sets, or
+ * ?token= for EventSource, which cannot set headers.
+ */
 function presentedToken(req: Request): string | null {
   const header = req.headers.get(TOKEN_HEADER);
   if (header?.trim()) return header.trim();
@@ -94,6 +136,9 @@ function presentedToken(req: Request): string | null {
     const match = /^bearer\s+(.+)$/i.exec(authorization.trim());
     if (match?.[1]) return match[1].trim();
   }
+
+  const cookie = readCookie(req, TOKEN_COOKIE);
+  if (cookie) return cookie;
 
   try {
     const query = new URL(req.url).searchParams.get('token');
@@ -105,7 +150,23 @@ function presentedToken(req: Request): string | null {
   return null;
 }
 
-function tokenMatches(presented: string): boolean {
+function readCookie(req: Request, name: string): string | null {
+  const header = req.headers.get('cookie');
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq === -1 || part.slice(0, eq).trim() !== name) continue;
+    const value = part.slice(eq + 1).trim();
+    try {
+      return value ? decodeURIComponent(value) : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function tokenMatches(presented: string): boolean {
   const expected = Buffer.from(getDashboardToken(), 'utf8');
   const actual = Buffer.from(presented, 'utf8');
   // timingSafeEqual throws on length mismatch, which is itself a length oracle,
@@ -132,9 +193,10 @@ export function requireLocalOrToken(req: Request): Response | null {
     JSON.stringify({
       error: {
         message:
-          'Switchboard only serves the dashboard to localhost. Send the dashboard token in ' +
-          `the ${TOKEN_HEADER} header, or set SWITCHBOARD_ALLOW_REMOTE=1 if this host is ` +
-          'already behind your own authentication.',
+          'Switchboard only serves the dashboard to localhost. Run `sb token` on the host and ' +
+          `send it in the ${TOKEN_HEADER} header (or open /dashboard?token=<token> once in a ` +
+          'browser), or set SWITCHBOARD_ALLOW_REMOTE=1 if this host is already behind your ' +
+          'own authentication.',
         type: 'forbidden',
         code: 'remote_access_denied',
       },

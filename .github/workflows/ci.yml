@@ -75,7 +75,7 @@ jobs:
       - name: Boot the gateway and probe it
         shell: bash
         run: |
-          npx next start -p 7272 &
+          npm start &
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7272/api/system/status || true)
             [ "$code" = "200" ] && break
@@ -87,3 +87,14 @@ jobs:
           curl -fsS http://127.0.0.1:7272/v1/models > /dev/null
           curl -fsS -X POST http://127.0.0.1:7272/api/system/bootstrap > /dev/null
           echo "gateway responded on all smoke endpoints"
+
+          # The access checks only work behind server.mjs, so prove it is the
+          # process answering: a relayed request and a rebinding Host must both
+          # be refused, even from loopback.
+          relayed=$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Forwarded-For: 127.0.0.1' http://127.0.0.1:7272/api/system/status)
+          rebound=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example:7272' http://127.0.0.1:7272/dashboard)
+          if [ "$relayed" != "403" ] || [ "$rebound" != "403" ]; then
+            echo "::error::access checks inactive (relayed=$relayed rebound=$rebound)"
+            exit 1
+          fi
+          echo "access checks active"

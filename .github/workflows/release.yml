@@ -82,7 +82,7 @@ jobs:
       - name: Smoke test the build
         if: steps.exists.outputs.already == 'false'
         run: |
-          npx next start -p 7272 &
+          npm start &
           for i in $(seq 1 30); do
             code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7272/api/system/status || true)
             [ "$code" = "200" ] && break

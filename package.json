@@ -25,6 +25,7 @@
     ".next",
     "bin",
     "public",
+    "server.mjs",
     "src",
     "next.config.ts",
     "postcss.config.mjs",
@@ -43,9 +44,9 @@
     "openai-compatible"
   ],
   "scripts": {
-    "dev": "next dev --turbopack -p 7272",
+    "dev": "next dev --turbopack -H 127.0.0.1 -p 7272",
     "build": "next build",
-    "start": "next start -p 7272",
+    "start": "node server.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
     "test": "vitest",

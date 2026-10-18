@@ -1,11 +1,16 @@
 import { z } from 'zod';
-import { requireLocalOrToken } from '@/lib/auth/session';
+import { adminGate } from '@/lib/auth/access';
 import { logger } from '@/lib/logger';
 
 /** Shared plumbing for the management API, so each handler stays declarative. */
 
+/**
+ * Every management handler calls this first, even though src/proxy.ts runs the
+ * same gate ahead of it: a handler that is reachable without the proxy (a
+ * matcher change, a test, a future route) must not be an open door.
+ */
 export function guard(req: Request): Response | null {
-  return requireLocalOrToken(req);
+  return adminGate(req);
 }
 
 export function ok<T>(data: T, status = 200): Response {
