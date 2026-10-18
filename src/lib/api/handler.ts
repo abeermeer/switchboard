@@ -19,6 +19,7 @@ import {
   clientMeta,
   corsHeaders,
   jsonError,
+  policyDenied,
   statusForErrorKind,
   typeForErrorKind,
 } from './respond';
@@ -58,6 +59,9 @@ export async function handleModality(
   const body = parsed.data as Record<string, unknown>;
   const requestedModel = typeof body['model'] === 'string' ? body['model'] : 'auto';
   const stream = body['stream'] === true;
+
+  const notAllowed = policyDenied(auth.key, requestedModel, req);
+  if (notAllowed !== null) return notAllowed;
 
   const result = await route({
     modality,

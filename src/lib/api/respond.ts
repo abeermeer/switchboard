@@ -184,6 +184,29 @@ export function authenticate(req: Request): AuthResult {
   return { key, error: null };
 }
 
+/**
+ * A key limited to named policies may only ask for those policies.
+ *
+ * The dashboard has offered "Allowed policies" since the first release and
+ * stored it on every key, but nothing ever read it, so a key restricted to
+ * `free-only` could still request `quality` or name a paid model directly.
+ * The rule is exact: anything other than an allowed slug (a bare model id, a
+ * provider pin, another policy) is refused, because each of those would
+ * route around the restriction.
+ */
+export function policyDenied(key: ApiKey | null, requestedModel: string, req?: Request): Response | null {
+  if (key === null || key.allowedCombos.length === 0) return null;
+  if (key.allowedCombos.includes(requestedModel)) return null;
+  return jsonError(
+    403,
+    `This API key may only use: ${key.allowedCombos.join(', ')}. "${requestedModel}" is not one of them.`,
+    'permission_error',
+    'model_not_allowed',
+    {},
+    req,
+  );
+}
+
 export function clientMeta(req: Request): { ip: string | null; userAgent: string | null } {
   return { ip: clientAddress(req), userAgent: req.headers.get('user-agent') };
 }

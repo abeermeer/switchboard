@@ -162,6 +162,38 @@ describe('gateway integration', () => {
       expect(second.status).toBe(429);
       expect(Number(second.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
     });
+
+    // Stored on every key since the first release and never read: a key
+    // limited to `free-only` could still name any policy or paid model.
+    it('refuses a policy the key is not allowed to use', async () => {
+      const { secret } = createApiKey({ name: 'free only', allowedCombos: ['free-only'] });
+      const headers = { authorization: `Bearer ${secret}` };
+
+      for (const model of ['auto', 'quality', 'groq/llama-3.3-70b-versatile', 'llama-3.3-70b-versatile']) {
+        const res = await chatPost(jsonRequest(CHAT_URL, { ...HELLO, model }, headers));
+        expect(res.status, model).toBe(403);
+        const body = (await res.json()) as { error: { code: string } };
+        expect(body.error.code).toBe('model_not_allowed');
+      }
+    });
+
+    it('serves a policy the key is allowed to use', async () => {
+      const { secret } = createApiKey({ name: 'auto only', allowedCombos: ['auto'] });
+
+      const res = await chatPost(
+        jsonRequest(CHAT_URL, { ...HELLO, model: 'auto' }, { authorization: `Bearer ${secret}` }),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    it('treats an empty allow-list as every policy, as the dashboard says', async () => {
+      const { secret } = createApiKey({ name: 'unrestricted', allowedCombos: [] });
+
+      const res = await chatPost(
+        jsonRequest(CHAT_URL, { ...HELLO, model: 'llama-3.3-70b-versatile' }, { authorization: `Bearer ${secret}` }),
+      );
+      expect(res.status).toBe(200);
+    });
   });
 
   // ── request validation ────────────────────────────────────────────────────
