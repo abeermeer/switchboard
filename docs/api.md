@@ -11,10 +11,10 @@ base URL.
 | `POST` | `/v1/completions` | Legacy; rewritten into a chat request |
 | `POST` | `/v1/embeddings` | |
 | `POST` | `/v1/images/generations` | |
-| `POST` | `/v1/audio/speech` | Returns audio bytes, not JSON |
+| `POST` | `/v1/audio/speech` | Returns audio bytes. No catalog provider serves it yet, so it answers 404 |
 | `POST` | `/v1/audio/transcriptions` | `multipart/form-data` |
 | `POST` | `/v1/rerank` | |
-| `POST` | `/v1/moderations` | |
+| `POST` | `/v1/moderations` | OpenAI's free `omni-moderation-latest` |
 | `GET` | `/v1/models` | |
 | `GET` | `/v1/models/{model}` | |
 

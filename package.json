@@ -58,6 +58,8 @@
     "electron:dev": "concurrently -k -n next,electron \"npm:dev\" \"wait-on tcp:7272 && cross-env SWITCHBOARD_DEV=1 electron electron/main.cjs\"",
     "electron:build": "npm run build && electron-builder --config electron/builder.config.cjs",
     "electron:build:win": "npm run build && electron-builder --win --config electron/builder.config.cjs",
+    "electron:build:mac": "npm run build && electron-builder --mac --config electron/builder.config.cjs",
+    "electron:build:linux": "npm run build && electron-builder --linux --config electron/builder.config.cjs",
     "verify:electron": "node scripts/verify-electron.mjs",
     "verify:name": "node scripts/verify-package-name.mjs",
     "verify:install": "node scripts/verify-global-install.mjs"
@@ -66,10 +68,10 @@
     "clsx": "^2.1.1",
     "commander": "^15.0.0",
     "lucide-react": "^1.26.0",
-    "next": "^16.2.11",
+    "next": "16.2.11",
     "picocolors": "^1.1.1",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "recharts": "^3.10.0",
     "tailwind-merge": "^3.3.1",
     "zod": "^4.4.3"

@@ -10,7 +10,7 @@ import net from 'node:net';
 import pc from 'picocolors';
 import { api, baseUrl } from './lib/client.mjs';
 import { banner, dot, fail, info, money, ms, ok, table, warn } from './lib/render.mjs';
-import { resolveDataDir } from './lib/dataDir.mjs';
+import { appDataDir, isInsidePackage, resolveDataDir } from './lib/dataDir.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -66,6 +66,13 @@ program
     const dataDir = resolveDataDir(root);
 
     banner(port, dataDir, host);
+
+    if (isInsidePackage(root, dataDir)) {
+      warn(`Your database and master key are inside ${root}.`);
+      info('Deleting or reinstalling that folder deletes every stored provider key.');
+      info(`Move ${dataDir} to ${appDataDir()} (or set SWITCHBOARD_DATA_DIR) to keep them safe.`);
+      console.log('');
+    }
 
     // server.mjs rather than `next start`: it binds the interface given here
     // (loopback unless told otherwise) and reads the caller's real address off
@@ -469,6 +476,9 @@ program
       ok(`Data directory writable — ${status.dataDir}`);
     } catch {
       fail(`Data directory not writable — ${status.dataDir}`);
+    }
+    if (isInsidePackage(root, status.dataDir)) {
+      warn(`Data directory is inside the install at ${root}; deleting it deletes your keys`);
     }
 
     if (existsSync(join(root, '.next'))) ok('Production build present');

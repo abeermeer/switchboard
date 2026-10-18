@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OPTIONS as chatOptions, POST as chatPost } from '@/app/v1/chat/completions/route';
 import { GET as modelsGet } from '@/app/v1/models/route';
+import { POST as moderationsPost } from '@/app/v1/moderations/route';
 import { POST as bootstrapPost } from '@/app/api/system/bootstrap/route';
 import { createConnection } from '@/lib/db/repos/connections';
 import { setCredential } from '@/lib/db/repos/credentials';
@@ -312,6 +313,29 @@ describe('gateway integration', () => {
 
       const res = await chatPost(jsonRequest(CHAT_URL, { ...HELLO, model: 'llama-3.3-70b-versatile' }));
       expect(res.headers.get('x-switchboard-substituted')).toBeNull();
+    });
+  });
+
+  // ── moderations ───────────────────────────────────────────────────────────
+
+  describe('POST /v1/moderations', () => {
+    // Advertised in the README since the first release, but no catalog model
+    // served the modality, so it answered 404 with OpenAI connected.
+    it('is served by OpenAI once it is connected', async () => {
+      const openai = createConnection({ providerId: 'openai' });
+      setCredential(openai.id, 'sk-test-openai-000000000000');
+      upstream = stubUpstream([
+        { status: 200, json: { id: 'modr-1', model: 'omni-moderation-latest', results: [{ flagged: false }] } },
+      ]);
+
+      const res = await moderationsPost(
+        jsonRequest('http://127.0.0.1:7272/v1/moderations', { input: 'hello' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(upstream.calls[0]?.url).toBe('https://api.openai.com/v1/moderations');
+      expect((upstream.calls[0]?.body as { model?: string }).model).toBe('omni-moderation-latest');
+      expect(res.headers.get('x-switchboard-cost-usd')).toBe('0.000000');
     });
   });
 

@@ -90,7 +90,12 @@ That's it. The dashboard is on **http://localhost:7272**, the gateway on
 
 Your database and encryption key live in your OS application-data directory
 (`%APPDATA%\Switchboard`, `~/Library/Application Support/Switchboard`, or
-`~/.local/share/Switchboard`), so reinstalling or upgrading never touches them.
+`~/.local/share/Switchboard`), so reinstalling, upgrading or deleting the clone never
+touches them. (Installs from before v0.4.2 kept them in `<clone>/data`; `sb start` keeps
+using that folder if it finds a database there, and tells you to move it.)
+
+The gateway listens on `127.0.0.1` only. `sb start --host 0.0.0.0` puts it on your
+network; see [Remote access](#remote-access) first.
 
 **2) Connect a free provider**
 
@@ -129,8 +134,18 @@ npm start
 
 ```bash
 docker build -t switchboard .
-docker run -d -p 7272:7272 -v switchboard-data:/data switchboard
+docker run -d --name switchboard -p 127.0.0.1:7272:7272 -v switchboard-data:/data switchboard
 ```
+
+Inside the container the gateway listens on all interfaces, so what can reach it is decided
+by `-p`; publishing on `127.0.0.1` keeps it on your machine. Requests arriving through
+Docker's port forward do not count as local, so open the dashboard with the token:
+
+```bash
+docker exec switchboard node bin/sb.mjs token   # then visit /dashboard?token=<token> once
+```
+
+or add `-e SWITCHBOARD_ALLOW_REMOTE=1` if the port is only published on loopback.
 
 **Desktop app** — `npm run electron:build:win` (or `:mac` / `:linux`) puts an installer in
 `release/`. Runs in the tray with start-at-login.
@@ -153,13 +168,6 @@ policy slug you have defined.
 ---
 
 ## Point your tools at it
-
-**Claude Code**
-
-```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:7272/v1"
-export ANTHROPIC_API_KEY="sb-live-your-key"
-```
 
 **Cursor** — Settings → Models → Override OpenAI Base URL
 
@@ -195,6 +203,11 @@ const client = new OpenAI({
 **Cline / Continue / Aider** — any "OpenAI-compatible endpoint" field takes the same base
 URL and key.
 
+**Not supported yet: Anthropic-protocol clients.** The gateway speaks the OpenAI wire
+format only. There is no `/v1/messages`, so tools configured through `ANTHROPIC_BASE_URL`
+(Claude Code among them) cannot use it. Anthropic models are reachable the other way
+round: connect an Anthropic key and call them through `/v1/chat/completions`.
+
 ---
 
 ## Endpoints
@@ -205,10 +218,10 @@ URL and key.
 | `POST` | `/v1/completions` | Legacy, shimmed onto chat |
 | `POST` | `/v1/embeddings` | |
 | `POST` | `/v1/images/generations` | |
-| `POST` | `/v1/audio/speech` | Returns audio bytes |
+| `POST` | `/v1/audio/speech` | Route only: no provider in the catalog serves text-to-speech yet |
 | `POST` | `/v1/audio/transcriptions` | Multipart upload |
 | `POST` | `/v1/rerank` | |
-| `POST` | `/v1/moderations` | |
+| `POST` | `/v1/moderations` | Served by OpenAI's free `omni-moderation-latest` |
 | `GET` | `/v1/models` | Every model across every connected provider |
 | `GET` | `/v1/models/{model}` | |
 
@@ -325,9 +338,11 @@ Everything is optional; sane defaults are generated on first run.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `7272` | Gateway and dashboard |
-| `SWITCHBOARD_DATA_DIR` | `./data` | Database, key vault, logs |
+| `SWITCHBOARD_HOST` | `127.0.0.1` | Interface to listen on; `0.0.0.0` exposes it to your network |
+| `SWITCHBOARD_DATA_DIR` | OS app-data folder (`./data` under `npm run dev`) | Database, key vault, logs |
 | `SWITCHBOARD_MASTER_KEY` | generated | Base64 32-byte key for credential encryption |
-| `SWITCHBOARD_ALLOW_REMOTE` | `0` | Allow non-loopback dashboard access |
+| `SWITCHBOARD_ALLOW_REMOTE` | `0` | Treat remote callers as trusted: dashboard without the token, gateway without a key until one exists |
+| `SWITCHBOARD_ALLOWED_HOSTS` | *(none)* | Hostnames to answer besides IP addresses and `localhost`, e.g. a reverse proxy's name |
 | `SWITCHBOARD_CORS_ORIGINS` | *(none)* | Origins allowed to call `/v1` from a browser |
 | `SWITCHBOARD_LOG_LEVEL` | `info` / `debug` | `debug` · `info` · `warn` · `error` · `silent` |
 | `SWITCHBOARD_LOG_FORMAT` | auto | `json`, or `pretty` in a TTY |
@@ -336,6 +351,28 @@ Everything is optional; sane defaults are generated on first run.
 Provider credentials are sealed with **AES-256-GCM** before they touch disk. The master key
 lives in `<data-dir>/master.key` with `0600` permissions. No endpoint returns a stored
 credential — only a four-character hint.
+
+### Remote access
+
+Switchboard listens on `127.0.0.1` unless you pass `--host 0.0.0.0` (or set
+`SWITCHBOARD_HOST`). Who counts as local is decided from the socket by `server.mjs`, not
+from a header a client can forge, and a request relayed by any proxy counts as remote.
+
+From another machine:
+
+- **Dashboard and management API:** run `sb token` on the host, then open
+  `/dashboard?token=<token>` once; it becomes an HttpOnly cookie. Scripts can send it in
+  the `x-switchboard-token` header (the CLI reads `SWITCHBOARD_TOKEN`). `sb token --rotate`
+  signs every browser out. Only a shell on the host can read or rotate the token.
+- **Gateway:** remote callers always need an API key. With no key created yet, the gateway
+  only answers the machine it runs on.
+- **Behind your own auth** (a reverse proxy, a tunnel): `SWITCHBOARD_ALLOW_REMOTE=1` skips
+  both of the above, and `SWITCHBOARD_ALLOWED_HOSTS` lists the proxy's hostname.
+
+Two attacks come from your own browser rather than the network, so they apply even on
+loopback: a page that rebinds its domain to `127.0.0.1` is refused because only IP
+addresses, `localhost` and listed names are answered; and a page posting to the dashboard
+is refused because writes from another origin are rejected.
 
 ### CORS
 
@@ -352,7 +389,9 @@ SWITCHBOARD_CORS_ORIGINS=http://localhost:3000,https://myapp.example
 
 Allowed origins are reflected rather than wildcarded, with `Vary: Origin` so a shared cache
 cannot hand one origin's response to another. `*` still works if you want the old
-behaviour, but it is now a decision rather than a default.
+behaviour, but it is now a decision rather than a default. A browser request from an origin
+that is not listed is refused outright, not just left unreadable: if a page may not read
+the answer, it may not spend money producing it either.
 
 ### Logging
 
@@ -379,7 +418,7 @@ forever, which is a legitimate choice rather than an unconfigured one.
 ## CLI
 
 ```bash
-sb start [--port] [--open]   # start the gateway
+sb start [--port] [--host] [--open]   # start the gateway (loopback unless --host)
 sb status                    # health at a glance
 sb doctor                    # diagnose the install
 sb providers list            # connections with status and spend
@@ -392,6 +431,7 @@ sb chat [--model]            # streaming REPL
 sb logs [--errors]           # recent requests
 sb usage [--days 7]          # spend summary
 sb open                      # open the dashboard
+sb token [--rotate]          # dashboard token for remote browsers
 ```
 
 ---

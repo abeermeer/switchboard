@@ -455,7 +455,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     docsUrl: 'https://platform.openai.com/docs/api-reference/chat',
     signupUrl: 'https://platform.openai.com/api-keys',
     freeTier: null,
-    modalities: ['chat', 'embeddings', 'images', 'audio.transcription'],
+    modalities: ['chat', 'embeddings', 'images', 'audio.transcription', 'moderation'],
     accent: '#10A37F',
     requiresKey: true,
     blurb: 'The reference implementation. Everything else in this list imitates its wire format.',
@@ -471,6 +471,21 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       embedding('text-embedding-3-large', 'Text Embedding 3 Large', 8_191, 0.13),
       image('gpt-image-1', 'GPT Image 1', 5.0, 40.0),
       transcription('whisper-1', 'Whisper v2'),
+      {
+        // OpenAI's moderation endpoint is free of charge. Without a catalog entry
+        // /v1/moderations was advertised but answered 404 with every provider
+        // connected. OpenAI publishes no token window for it; 32K is a bound,
+        // not a quote, and a longer input is rejected upstream either way.
+        id: 'omni-moderation-latest',
+        name: 'Omni Moderation',
+        modality: 'moderation',
+        features: [],
+        contextWindow: 32_768,
+        maxOutput: 0,
+        inputCostPerMTok: 0,
+        outputCostPerMTok: 0,
+        throughputPrior: 0,
+      },
     ],
   },
   {
