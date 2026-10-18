@@ -124,10 +124,22 @@ export function normalizeUsage(raw: unknown): TokenUsage | null {
     return null;
   }
 
+  // TokenUsage.completionTokens includes reasoning. OpenAI and DeepSeek already
+  // count it inside completion_tokens; Gemini reports thoughts beside
+  // candidatesTokenCount, and some OpenAI-compatible providers do the same,
+  // which their total gives away (prompt + completion + reasoning). Billing
+  // reasoning on top of an OpenAI completion count overstated an o4-mini
+  // request by 64%.
+  const reportedSeparately =
+    reasoningTokens > 0 &&
+    (finiteNumber(raw.thoughtsTokenCount) !== null ||
+      (declaredTotal > 0 && declaredTotal >= promptTokens + completionTokens + reasoningTokens));
+  const billedOutput = reportedSeparately ? completionTokens + reasoningTokens : completionTokens;
+
   return {
     promptTokens,
-    completionTokens,
-    totalTokens: declaredTotal > 0 ? declaredTotal : promptTokens + completionTokens,
+    completionTokens: billedOutput,
+    totalTokens: declaredTotal > 0 ? declaredTotal : promptTokens + billedOutput,
     cachedTokens,
     reasoningTokens,
   };

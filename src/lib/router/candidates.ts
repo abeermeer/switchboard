@@ -13,7 +13,7 @@ import { hasCredential } from '@/lib/db/repos/credentials';
 import { getComboBySlug, getDefaultCombo } from '@/lib/db/repos/combos';
 import { isLockedOut } from '@/lib/db/repos/health';
 import { monthToDateCostForConnection } from '@/lib/db/repos/usage';
-import { isAvailable } from '@/lib/resilience/breaker';
+import { wouldAllow } from '@/lib/resilience/breaker';
 import { findModel, getProvider, inferTier, listModelsFor } from '@/lib/providers/registry';
 import { blendedPrice, fitsContext, projectCost } from './estimate';
 
@@ -42,6 +42,14 @@ export interface ExpandResult {
    */
   unrecognizedModel: boolean;
 }
+
+/**
+ * The two exclusions that lift on their own. When every candidate is out for
+ * one of these, the request failed because providers are down right now, not
+ * because nothing could ever serve it, and the client should retry.
+ */
+export const BREAKER_OPEN = 'Circuit breaker open — provider is failing';
+export const MODEL_LOCKED_OUT = 'Model rate-limited (429 lockout active)';
 
 interface Pairing {
   connection: Connection;
@@ -261,8 +269,8 @@ function evaluate(
   if (model.modality !== input.modality) return exclude(`Model does not serve ${input.modality}`);
   if (provider.requiresKey && !hasCredential(connection.id)) return exclude('No API key configured');
 
-  if (!isAvailable(connection.id)) return exclude('Circuit breaker open — provider is failing');
-  if (isLockedOut(connection.id, model.id)) return exclude('Model rate-limited (429 lockout active)');
+  if (!wouldAllow(connection.id)) return exclude(BREAKER_OPEN);
+  if (isLockedOut(connection.id, model.id)) return exclude(MODEL_LOCKED_OUT);
 
   for (const feature of requires) {
     if (!model.features.includes(feature)) return exclude(`Model lacks required feature: ${feature}`);

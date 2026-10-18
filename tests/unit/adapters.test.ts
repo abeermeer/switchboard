@@ -199,24 +199,48 @@ describe('normalizeUsage', () => {
     );
   });
 
-  it('reads the Gemini spelling including thoughts and cached content', () => {
+  it('reads the Gemini spelling and folds thoughts into completion', () => {
+    // candidatesTokenCount excludes thinking and Google bills both at the
+    // output rate, so completionTokens has to carry the sum.
     expect(
       normalizeUsage({
         promptTokenCount: 3,
         candidatesTokenCount: 4,
-        totalTokenCount: 7,
+        totalTokenCount: 8,
         cachedContentTokenCount: 2,
         thoughtsTokenCount: 1,
       }),
     ).toEqual(
       usage({
         promptTokens: 3,
-        completionTokens: 4,
-        totalTokens: 7,
+        completionTokens: 5,
+        totalTokens: 8,
         cachedTokens: 2,
         reasoningTokens: 1,
       }),
     );
+  });
+
+  it('leaves an OpenAI completion count alone: reasoning is already inside it', () => {
+    expect(
+      normalizeUsage({
+        prompt_tokens: 10,
+        completion_tokens: 50,
+        total_tokens: 60,
+        completion_tokens_details: { reasoning_tokens: 40 },
+      }),
+    ).toEqual(usage({ promptTokens: 10, completionTokens: 50, totalTokens: 60, reasoningTokens: 40 }));
+  });
+
+  it('folds reasoning in when the total shows it was reported beside completion', () => {
+    expect(
+      normalizeUsage({
+        prompt_tokens: 10,
+        completion_tokens: 10,
+        total_tokens: 60,
+        completion_tokens_details: { reasoning_tokens: 40 },
+      }),
+    ).toEqual(usage({ promptTokens: 10, completionTokens: 50, totalTokens: 60, reasoningTokens: 40 }));
   });
 
   it('reads Cohere counts nested under tokens', () => {

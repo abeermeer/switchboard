@@ -110,11 +110,27 @@ function openBreaker(row: HealthRow, now: number): HealthRow {
 }
 
 /**
- * Whether the router may send traffic here right now.
+ * Whether traffic could go here right now, without claiming anything.
+ *
+ * Candidate expansion, scoring and the routing simulator all ask this. They
+ * used to call `isAvailable`, which hands out the half-open trial slot as a
+ * side effect, so a dry run on the routing page, or a candidate ranked fifth
+ * and never tried, took the one trial and held it for the whole trial window
+ * while nothing was sent. The connection then stayed out of rotation for no
+ * reason.
+ */
+export function wouldAllow(connectionId: string): boolean {
+  const row = getHealthRow(connectionId);
+  if (row.breaker === 'closed') return true;
+  return row.cooldownUntil === null || row.cooldownUntil <= Date.now();
+}
+
+/**
+ * Claims the right to send this request, immediately before it goes out.
  *
  * This deliberately mutates: the open → half-open transition is what hands out
  * the single trial request, so it has to happen exactly once, on the first
- * caller to arrive after the cooldown lapses.
+ * request actually sent after the cooldown lapses. Only the executor calls it.
  */
 export function isAvailable(connectionId: string): boolean {
   const row = getHealthRow(connectionId);

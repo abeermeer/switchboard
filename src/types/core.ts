@@ -268,11 +268,17 @@ export interface RouteAttempt {
 
 export interface TokenUsage {
   promptTokens: number;
+  /**
+   * Every output token billed, visible and reasoning alike. OpenAI's
+   * `completion_tokens` already includes reasoning; providers that report
+   * thinking separately (Gemini's thoughtsTokenCount) are folded in when the
+   * usage is normalized, so nothing downstream adds them twice.
+   */
   completionTokens: number;
   totalTokens: number;
   /** Tokens served from the provider's prompt cache, when reported. */
   cachedTokens: number;
-  /** Reasoning tokens billed separately, when reported. */
+  /** How many of `completionTokens` were reasoning. A breakdown, never billed on top. */
   reasoningTokens: number;
 }
 
@@ -411,6 +417,7 @@ export interface AdapterError {
     | 'timeout'
     | 'network'
     | 'unsupported'     // model or feature not available here
+    | 'unavailable'     // every candidate is temporarily out (breaker, lockout); 503
     | 'unknown';
   message: string;
   /** Seconds the provider asked us to wait, from Retry-After. */

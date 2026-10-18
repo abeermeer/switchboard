@@ -225,6 +225,10 @@ export function statusForErrorKind(kind: string): number {
       return 400;
     case 'unsupported':
       return 404;
+    case 'unavailable':
+      // 503, not 404: the model exists and will be served once a breaker
+      // closes or a lockout lapses, and SDKs retry a 503 on their own.
+      return 503;
     case 'timeout':
       return 504;
     default:
