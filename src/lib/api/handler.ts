@@ -76,6 +76,13 @@ export async function handleModality(
   const settings = getSettings();
   const logPayloads = settings.logPayloads;
 
+  if (result.unrecognizedModel) {
+    requestLogger({ requestId: result.decision.requestId, modality, requestedModel }).warn(
+      'requested model is not recognised; routed as auto',
+      { requestedModel },
+    );
+  }
+
   // ── total failure ─────────────────────────────────────────────────────────
   if (result.response === null || !result.response.ok) {
     const err = result.error ?? {
@@ -120,7 +127,7 @@ export async function handleModality(
       tried: result.decision.attempts.map((a) => `${a.providerId}:${a.modelId}=${a.fallbackReason ?? a.status}`),
     });
 
-    const headers: Record<string, string> = { ...traceHeaders(result.decision, 0, null) };
+    const headers: Record<string, string> = { ...traceHeaders(result.decision, 0, null, result.unrecognizedModel) };
     if (err.retryAfterSec !== null) headers['retry-after'] = String(err.retryAfterSec);
 
     return jsonError(status, err.message, typeForErrorKind(err.kind), err.kind, headers, req);
@@ -215,7 +222,7 @@ export async function handleModality(
         // streaming response into a single delayed blob.
         'x-accel-buffering': 'no',
         ...corsHeaders(req),
-        ...traceHeaders(result.decision, 0, model),
+        ...traceHeaders(result.decision, 0, model, result.unrecognizedModel),
       },
     });
   }
@@ -262,7 +269,7 @@ export async function handleModality(
     headers: {
       'content-type': 'application/json',
       ...corsHeaders(req),
-      ...traceHeaders(result.decision, settled.costUsd, model),
+      ...traceHeaders(result.decision, settled.costUsd, model, result.unrecognizedModel),
     },
   });
 }
@@ -297,6 +304,7 @@ function traceHeaders(
   decision: RoutingDecision,
   costUsd: number,
   model: { id: string } | null,
+  unrecognizedModel = false,
 ): Record<string, string> {
   const winner = decision.winningAttempt;
   const attempt = winner === null ? null : (decision.attempts[winner] ?? null);
@@ -320,6 +328,11 @@ function traceHeaders(
     );
     if (chosen !== undefined) headers['x-switchboard-tier'] = chosen.tier;
   }
+
+  // A client that asked for a model the gateway does not know was served
+  // whatever "auto" picked. Its own model name is echoed back so the
+  // substitution is visible from curl, not only in the dashboard.
+  if (unrecognizedModel) headers['x-switchboard-substituted'] = headerSafe(decision.requestedModel);
 
   // Only present when a fallback actually happened, so its presence is itself
   // the signal that the first choice failed.

@@ -34,6 +34,13 @@ export interface ExpandResult {
   modality: Modality;
   /** Set when the model string named a provider that is not configured. */
   hardError: string | null;
+  /**
+   * True when the model string matched no policy, provider pin or catalog
+   * model, so the request was routed as if it had said "auto". Clients with a
+   * hard-coded model name rely on that, but it has to be visible: the caller
+   * asked for one model and is being served another.
+   */
+  unrecognizedModel: boolean;
 }
 
 interface Pairing {
@@ -53,11 +60,17 @@ interface Pairing {
  * for what reason.
  */
 export function expandCandidates(input: ExpandInput): ExpandResult {
-  const combo = resolveCombo(input.requestedModel, input.modality);
-  const pairings = collectPairings(input, combo);
+  const pairings = collectPairings(input);
+  const { combo } = pairings;
 
   if (pairings.hardError !== null) {
-    return { candidates: [], combo, modality: input.modality, hardError: pairings.hardError };
+    return {
+      candidates: [],
+      combo,
+      modality: input.modality,
+      hardError: pairings.hardError,
+      unrecognizedModel: false,
+    };
   }
 
   const requires = mergeFeatures(combo, input.requiredFeatures);
@@ -67,18 +80,19 @@ export function expandCandidates(input: ExpandInput): ExpandResult {
     evaluate(pair, input, requires, maxCost),
   );
 
-  return { candidates, combo, modality: input.modality, hardError: null };
+  return {
+    candidates,
+    combo,
+    modality: input.modality,
+    hardError: null,
+    unrecognizedModel: pairings.unrecognized,
+  };
 }
 
-/** Combo lookup: exact slug, then the configured default. */
-function resolveCombo(requestedModel: string, modality: Modality): Combo | null {
-  const bySlug = getComboBySlug(requestedModel);
-  if (bySlug !== null && bySlug.enabled) return bySlug;
-
-  // Only fall back to the default policy for the modality it was written for.
+/** The configured default policy, for the modality it was written for only. */
+function defaultComboFor(modality: Modality): Combo | null {
   const fallback = getDefaultCombo();
-  if (fallback !== null && fallback.modality === modality) return fallback;
-  return null;
+  return fallback !== null && fallback.enabled && fallback.modality === modality ? fallback : null;
 }
 
 function mergeFeatures(combo: Combo | null, extra: ChatFeature[]): ChatFeature[] {
@@ -90,39 +104,34 @@ function mergeFeatures(combo: Combo | null, extra: ChatFeature[]): ChatFeature[]
 interface PairingSet {
   pairs: Pairing[];
   hardError: string | null;
+  /** The policy that governs strategy, ceiling and features, if any. */
+  combo: Combo | null;
+  unrecognized: boolean;
 }
 
-function collectPairings(input: ExpandInput, combo: Combo | null): PairingSet {
+/**
+ * Resolution order, most specific first: a policy slug, a "provider/model"
+ * pin, a bare catalog model id, and only then the default policy.
+ *
+ * The default used to be resolved up front for every request. Because the
+ * seeded `auto` policy is the default, a pin like `groq/llama-3.3-70b-versatile`
+ * never reached its own branch (it required no policy to be in play) and fell
+ * through to "the whole fleet": the client asked for one provider and got any
+ * model on any of them. The suite missed it because it never seeded the
+ * policies a real install creates on first load.
+ */
+function collectPairings(input: ExpandInput): PairingSet {
   const connections = listConnections();
-  const byId = new Map(connections.map((c) => [c.id, c]));
 
-  // A combo with an explicit member list pins the search to those members.
-  if (combo !== null && combo.members.length > 0) {
-    const pairs: Pairing[] = [];
-    for (const member of combo.members) {
-      if (!member.enabled) continue;
-      const connection = byId.get(member.connectionId);
-      if (connection === undefined) continue;
-      const provider = getProvider(connection.providerId);
-      if (provider === null) continue;
-
-      if (member.modelId === '*') {
-        for (const model of listModelsFor(provider.id, input.modality)) {
-          pairs.push({ connection, provider, model, memberOrder: member.order });
-        }
-        continue;
-      }
-      const model = findModel(provider.id, member.modelId);
-      if (model === null) continue;
-      pairs.push({ connection, provider, model, memberOrder: member.order });
-    }
-    return { pairs, hardError: null };
+  const named = getComboBySlug(input.requestedModel);
+  if (named !== null && named.enabled) {
+    return { ...comboPairings(input, named, connections), combo: named, unrecognized: false };
   }
 
   // "provider/model" pins the provider but still spreads across every
   // connection the user holds for it, so a second key still provides failover.
   const slash = input.requestedModel.indexOf('/');
-  if (slash > 0 && combo === null) {
+  if (slash > 0) {
     const providerId = input.requestedModel.slice(0, slash);
     const modelId = input.requestedModel.slice(slash + 1);
     const provider = getProvider(providerId);
@@ -130,16 +139,26 @@ function collectPairings(input: ExpandInput, combo: Combo | null): PairingSet {
     if (provider !== null) {
       const model = findModel(providerId, modelId);
       if (model === null) {
-        return { pairs: [], hardError: `Model "${modelId}" is not available on ${provider.name}.` };
+        return {
+          pairs: [],
+          hardError: `Model "${modelId}" is not available on ${provider.name}.`,
+          combo: null,
+          unrecognized: false,
+        };
       }
       const pairs = connections
         .filter((c) => c.providerId === providerId)
         .map((connection) => ({ connection, provider, model, memberOrder: Number.POSITIVE_INFINITY }));
 
       if (pairs.length === 0) {
-        return { pairs: [], hardError: `No connection is configured for ${provider.name}.` };
+        return {
+          pairs: [],
+          hardError: `No connection is configured for ${provider.name}.`,
+          combo: null,
+          unrecognized: false,
+        };
       }
-      return { pairs, hardError: null };
+      return { pairs, hardError: null, combo: null, unrecognized: false };
     }
   }
 
@@ -154,10 +173,53 @@ function collectPairings(input: ExpandInput, combo: Combo | null): PairingSet {
     if (model === null) continue;
     exact.push({ connection, provider, model, memberOrder: Number.POSITIVE_INFINITY });
   }
-  if (exact.length > 0) return { pairs: exact, hardError: null };
+  if (exact.length > 0) return { pairs: exact, hardError: null, combo: null, unrecognized: false };
 
-  // Nothing matched by name, so this is an "auto"-style request: consider the
-  // whole fleet for this modality and let scoring decide.
+  // Nothing matched by name, so this is an "auto"-style request: the default
+  // policy governs it if there is one, otherwise the whole fleet for this
+  // modality competes on score.
+  const unrecognized = input.requestedModel !== 'auto';
+  const fallback = defaultComboFor(input.modality);
+  if (fallback !== null) {
+    return { ...comboPairings(input, fallback, connections), combo: fallback, unrecognized };
+  }
+  return { pairs: fleetPairings(input, connections), hardError: null, combo: null, unrecognized };
+}
+
+/**
+ * A policy with an explicit member list pins the search to those members; an
+ * empty list means every eligible connection.
+ */
+function comboPairings(
+  input: ExpandInput,
+  combo: Combo,
+  connections: Connection[],
+): { pairs: Pairing[]; hardError: null } {
+  if (combo.members.length === 0) return { pairs: fleetPairings(input, connections), hardError: null };
+
+  const byId = new Map(connections.map((c) => [c.id, c]));
+  const pairs: Pairing[] = [];
+  for (const member of combo.members) {
+    if (!member.enabled) continue;
+    const connection = byId.get(member.connectionId);
+    if (connection === undefined) continue;
+    const provider = getProvider(connection.providerId);
+    if (provider === null) continue;
+
+    if (member.modelId === '*') {
+      for (const model of listModelsFor(provider.id, input.modality)) {
+        pairs.push({ connection, provider, model, memberOrder: member.order });
+      }
+      continue;
+    }
+    const model = findModel(provider.id, member.modelId);
+    if (model === null) continue;
+    pairs.push({ connection, provider, model, memberOrder: member.order });
+  }
+  return { pairs, hardError: null };
+}
+
+function fleetPairings(input: ExpandInput, connections: Connection[]): Pairing[] {
   const all: Pairing[] = [];
   for (const connection of connections) {
     const provider = getProvider(connection.providerId);
@@ -166,7 +228,7 @@ function collectPairings(input: ExpandInput, combo: Combo | null): PairingSet {
       all.push({ connection, provider, model, memberOrder: Number.POSITIVE_INFINITY });
     }
   }
-  return { pairs: all, hardError: null };
+  return all;
 }
 
 function evaluate(

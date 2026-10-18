@@ -298,6 +298,21 @@ describe('gateway integration', () => {
       const res = await chatPost(jsonRequest(CHAT_URL, HELLO));
       expect(res.headers.get('x-switchboard-fallback-reason')).toBeNull();
     });
+
+    it('says so when it serves a model the client did not ask for', async () => {
+      upstream = stubUpstream([chatOk()]);
+
+      const res = await chatPost(jsonRequest(CHAT_URL, { ...HELLO, model: 'gpt-4o' }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-switchboard-substituted')).toBe('gpt-4o');
+    });
+
+    it('does not flag a model it recognised', async () => {
+      upstream = stubUpstream([chatOk()]);
+
+      const res = await chatPost(jsonRequest(CHAT_URL, { ...HELLO, model: 'llama-3.3-70b-versatile' }));
+      expect(res.headers.get('x-switchboard-substituted')).toBeNull();
+    });
   });
 
   // ── the fallback walk ─────────────────────────────────────────────────────
