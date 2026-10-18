@@ -599,6 +599,30 @@ describe('classifyHttpError', () => {
     expect(classifyHttpError(400, 'too many tokens', noHeaders()).kind).toBe('context_length');
   });
 
+  it.each([
+    'This model\'s maximum context length is 8192 tokens',
+    'Please reduce the length of the messages or completion.',
+    'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).',
+    'Prompt contains 40000 tokens, too large for model with 32768 maximum context length',
+    'context_length_exceeded',
+  ])('recognises the provider phrasing "%s" as context_length', (message) => {
+    expect(classifyHttpError(400, JSON.stringify({ error: { message } }), noHeaders()).kind).toBe(
+      'context_length',
+    );
+  });
+
+  it.each([
+    'max_tokens must be less than or equal to 8192',
+    'maximum value for temperature is 2',
+    'Invalid token in JSON at position 5',
+  ])('does not mistake "%s" for an over-long prompt', (message) => {
+    // These used to match, so a malformed request was retried on every
+    // provider and counted against each breaker.
+    expect(classifyHttpError(400, JSON.stringify({ error: { message } }), noHeaders()).kind).toBe(
+      'bad_request',
+    );
+  });
+
   it('classifies a generic malformed 400 as bad_request', () => {
     expect(
       classifyHttpError(400, '{"error":"Invalid value for parameter temperature"}', noHeaders())

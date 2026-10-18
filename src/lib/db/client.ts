@@ -8,7 +8,7 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { MIGRATIONS } from './schema';
@@ -53,9 +53,12 @@ export function getDb(): DatabaseSync {
   }
 
   const path = dbPath();
-  mkdirSync(dirname(path), { recursive: true });
+  // 0700 applies only to a directory this call creates; an existing one keeps
+  // whatever the operator chose.
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
 
   const handle = new DatabaseSync(path);
+  restrictToOwner(path);
 
   // WAL lets the dashboard read while the gateway writes.
   handle.exec('PRAGMA journal_mode = WAL');
@@ -68,6 +71,22 @@ export function getDb(): DatabaseSync {
   db = handle;
   g.__switchboardDb = handle;
   return handle;
+}
+
+/**
+ * The database holds every logged prompt and response. Created with the
+ * process umask it was world-readable (0644), while master.key next to it was
+ * already 0600. SQLite gives the -wal and -shm files the database's own mode
+ * when it creates them; existing ones are tightened here too.
+ */
+function restrictToOwner(path: string): void {
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+    try {
+      if (existsSync(file)) chmodSync(file, 0o600);
+    } catch {
+      // Windows has no POSIX mode bits; the user's ACL is the protection there.
+    }
+  }
 }
 
 /**

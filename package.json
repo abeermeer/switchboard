@@ -48,7 +48,6 @@
     "build": "next build",
     "start": "node server.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "next lint",
     "test": "vitest",
     "test:run": "vitest run",
     "test:ci": "vitest run --coverage",

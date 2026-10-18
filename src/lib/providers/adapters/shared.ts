@@ -268,7 +268,15 @@ export function extractErrorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-const CONTEXT_LENGTH_RE = /context|token|too long|maximum|too large|exceeds/i;
+/**
+ * Phrases providers use for an over-long prompt, and nothing broader. The old
+ * pattern matched any 400 that mentioned "token" or "maximum", so "max_tokens
+ * must be <= 8192" or "maximum value for temperature is 2" became
+ * context_length: retried on every remaining provider and counted against
+ * each one's breaker, for a request that could never succeed.
+ */
+const CONTEXT_LENGTH_RE =
+  /context.?(length|window|limit)|maximum context|too many (input )?tokens|(prompt|input|message)s? (is|are) too long|reduce the length|too large for (the )?model|token limit|exceeds? the (model'?s )?(maximum|max|context)/i;
 const QUOTA_RE = /quota|billing|credit|insufficient.?(balance|funds)|payment|spend limit/i;
 const MODEL_MISSING_RE = /model|not found|does not exist|unsupported|unknown|no such/i;
 
