@@ -2,17 +2,19 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OPTIONS as chatOptions, POST as chatPost } from '@/app/v1/chat/completions/route';
 import { GET as modelsGet } from '@/app/v1/models/route';
 import { POST as moderationsPost } from '@/app/v1/moderations/route';
+import { POST as speechPost } from '@/app/v1/audio/speech/route';
 import { POST as bootstrapPost } from '@/app/api/system/bootstrap/route';
 import { createConnection } from '@/lib/db/repos/connections';
 import { setCredential } from '@/lib/db/repos/credentials';
 import { createApiKey } from '@/lib/db/repos/apiKeys';
-import { listCombos } from '@/lib/db/repos/combos';
+import { deleteCombo, ensureSeedCombos, listCombos, updateCombo } from '@/lib/db/repos/combos';
 import { listRequestLogs, getRequestLog } from '@/lib/db/repos/log';
 import { clearRateLimit } from '@/lib/auth/rateLimit';
 import { reloadMasterKey } from '@/lib/crypto/vault';
 import { dropDb, freshDb } from '../helpers/db';
 import { chatOk, jsonRequest, providerError, stubUpstream, type Upstream } from '../helpers/upstream';
 
+const BASE_URL = 'http://127.0.0.1:7272';
 const CHAT_URL = 'http://127.0.0.1:7272/v1/chat/completions';
 const MODELS_URL = 'http://127.0.0.1:7272/v1/models';
 const BOOTSTRAP_URL = 'http://127.0.0.1:7272/api/system/bootstrap';
@@ -179,12 +181,52 @@ describe('gateway integration', () => {
     });
 
     it('serves a policy the key is allowed to use', async () => {
+      ensureSeedCombos();
       const { secret } = createApiKey({ name: 'auto only', allowedCombos: ['auto'] });
 
       const res = await chatPost(
         jsonRequest(CHAT_URL, { ...HELLO, model: 'auto' }, { authorization: `Bearer ${secret}` }),
       );
       expect(res.status).toBe(200);
+    });
+
+    // A disabled, deleted or renamed policy's old slug no longer matches, so the
+    // router took it for an unknown model and served it through the default
+    // policy with no ceiling: one click turned a restricted key unrestricted.
+    it.each(['disabled', 'deleted'])('refuses a restricted key whose policy was %s', async (action) => {
+      ensureSeedCombos();
+      const { secret } = createApiKey({ name: 'free only', allowedCombos: ['free-only'] });
+      const combo = listCombos().find((c) => c.slug === 'free-only')!;
+      if (action === 'disabled') updateCombo(combo.id, { enabled: false });
+      else deleteCombo(combo.id);
+
+      const res = await chatPost(
+        jsonRequest(CHAT_URL, { ...HELLO, model: 'free-only' }, { authorization: `Bearer ${secret}` }),
+      );
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('policy_unavailable');
+    });
+
+    it('applies the restriction on /v1/audio/speech too, which skips the shared handler', async () => {
+      const { secret } = createApiKey({ name: 'free only', allowedCombos: ['free-only'] });
+
+      const res = await speechPost(
+        jsonRequest(`${BASE_URL}/v1/audio/speech`, { model: 'tts-1', input: 'hi', voice: 'alloy' }, {
+          authorization: `Bearer ${secret}`,
+        }),
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it('does not forward fields that would let the upstream pick another model', async () => {
+      await chatPost(
+        jsonRequest(CHAT_URL, { ...HELLO, models: ['anthropic/claude-opus-4.5'], route: 'fallback' }),
+      );
+
+      const sent = upstream.calls[0]?.body as Record<string, unknown>;
+      expect(sent.models).toBeUndefined();
+      expect(sent.route).toBeUndefined();
     });
 
     it('treats an empty allow-list as every policy, as the dashboard says', async () => {

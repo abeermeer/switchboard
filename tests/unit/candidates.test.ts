@@ -348,6 +348,20 @@ describe('router/expandCandidates', () => {
       expect(new Set(res.candidates.map((c) => c.providerId))).toEqual(new Set(['openai', 'openrouter']));
     });
 
+    it('lets free-only use only OpenRouter models that are actually free', () => {
+      // OpenRouter's allowance covers its `:free` variants. Its paid models fell
+      // under the $1/MTok heuristic, so free-only routed to them and logged $0.
+      connect('openrouter');
+
+      const res = expandCandidates(ex('free-only'));
+      const eligible = res.candidates.filter((c) => c.excludedReason === null).map((c) => c.modelId);
+
+      expect(eligible.length).toBeGreaterThan(0);
+      expect(eligible.every((id) => id.endsWith(':free'))).toBe(true);
+      const flash = res.candidates.find((c) => c.modelId === 'google/gemini-2.5-flash');
+      expect(flash?.tier).not.toBe('free');
+    });
+
     it('ignores a disabled default policy', () => {
       connect('groq');
       const auto = expandCandidates(ex('auto')).combo;

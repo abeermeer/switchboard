@@ -3,9 +3,13 @@ import type { TokenUsage } from '@/types/core';
 import { route, type RouteResult } from '@/lib/router';
 import { getSettings } from '@/lib/db/repos/settings';
 import { recordRequest } from '@/lib/api/handler';
-import { clientMeta } from '@/lib/api/respond';
+import { clientMeta, statusForErrorKind } from '@/lib/api/respond';
 import { findModel } from '@/lib/providers/registry';
-import { normalizeUsage, settleRequest } from '@/lib/usage/cost';
+import { settleRequest } from '@/lib/usage/cost';
+// The adapters' normalizer, not the older one in usage/cost: it folds reasoning
+// that a provider reports beside completion (xAI) into the completion count,
+// which is what cost reads. The other one priced xAI reasoning about 98% low.
+import { normalizeUsage } from '@/lib/providers/adapters/shared';
 import { guard, handle, readBody } from '@/lib/api/admin';
 
 export const runtime = 'nodejs';
@@ -71,7 +75,7 @@ export function POST(req: Request): Promise<Response> {
             // Each column is a real, billed request, so it is logged and counted
             // like one. Without this, playground spend reached no chart, total or
             // connection budget.
-            const record = (error: string | null): void => {
+            const record = (error: string | null, httpStatus = 502): void => {
               if (result === null) return;
               recordRequest(
                 {
@@ -79,7 +83,7 @@ export function POST(req: Request): Promise<Response> {
                   requestedModel: model,
                   decision: result.decision,
                   status: error === null ? 'success' : 'error',
-                  httpStatus: error === null ? 200 : 502,
+                  httpStatus: error === null ? 200 : httpStatus,
                   durationMs: Date.now() - startedAt,
                   ttftMs,
                   streamed: true,
@@ -111,7 +115,7 @@ export function POST(req: Request): Promise<Response> {
               if (result.response === null || !result.response.ok || result.response.stream === null) {
                 const error = result.error?.message ?? 'No provider could serve this model.';
                 emit({ model, event: 'error', error, durationMs: Date.now() - startedAt });
-                record(error);
+                record(error, statusForErrorKind(result.error?.kind ?? 'unknown'));
                 return;
               }
 

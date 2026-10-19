@@ -95,8 +95,9 @@ function freeTier(
   requestsPerDay: number | null,
   tokensPerMinute: number | null,
   noCardRequired: boolean,
+  options: { zeroPricedOnly?: boolean } = {},
 ): FreeTier {
-  return { summary, requestsPerDay, tokensPerMinute, noCardRequired };
+  return { summary, requestsPerDay, tokensPerMinute, noCardRequired, ...options };
 }
 
 const TOOLS: ChatFeature[] = ['tools', 'json_mode'];
@@ -195,7 +196,10 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     },
     docsUrl: 'https://openrouter.ai/docs/quickstart',
     signupUrl: 'https://openrouter.ai/settings/keys',
-    freeTier: freeTier('50 req/day on :free models (1,000/day after $10 top-up)', 50, null, true),
+    // Only the `:free` variants are free; the rest bill the account's credits.
+    freeTier: freeTier('50 req/day on :free models (1,000/day after $10 top-up)', 50, null, true, {
+      zeroPricedOnly: true,
+    }),
     modalities: ['chat'],
     accent: '#6467F2',
     requiresKey: true,

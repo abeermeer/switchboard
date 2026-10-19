@@ -3,7 +3,7 @@ import { getSettings } from '@/lib/db/repos/settings';
 import { route } from '@/lib/router';
 import { deriveChatFeatures } from '@/lib/api/features';
 import { recordRequest } from '@/lib/api/handler';
-import { clientMeta } from '@/lib/api/respond';
+import { clientMeta, statusForErrorKind } from '@/lib/api/respond';
 import { findModel } from '@/lib/providers/registry';
 import { settleRequest } from '@/lib/usage/cost';
 import { fail, guard, handle, ok } from '@/lib/api/admin';
@@ -65,7 +65,9 @@ export function POST(req: Request, ctx: Ctx): Promise<Response> {
         requestedModel: original.requestedModel,
         decision: result.decision,
         status: succeeded ? 'success' : 'error',
-        httpStatus: succeeded ? (result.response?.httpStatus ?? 200) : 502,
+        httpStatus: succeeded
+          ? (result.response?.httpStatus ?? 200)
+          : statusForErrorKind(result.error?.kind ?? 'unknown'),
         durationMs: Date.now() - startedAt,
         ttftMs: result.response?.ttftMs ?? null,
         streamed: false,

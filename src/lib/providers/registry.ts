@@ -83,7 +83,7 @@ export function isCoveredByFreeTier(
   model: CatalogModel,
 ): boolean {
   if (model.inputCostPerMTok === 0 && model.outputCostPerMTok === 0) return true;
-  if (provider.freeTier === null) return false;
+  if (provider.freeTier === null || provider.freeTier.zeroPricedOnly === true) return false;
   return blendedCost(model) <= FREE_TIER_COVERS_UP_TO;
 }
 

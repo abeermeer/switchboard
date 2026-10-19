@@ -38,6 +38,12 @@ export interface FreeTier {
   tokensPerMinute: number | null;
   /** True when the provider never asks for a payment method. */
   noCardRequired: boolean;
+  /**
+   * The allowance covers only models listed at $0, never paid models however
+   * cheap. OpenRouter's covers its `:free` variants only; without this flag its
+   * paid models under the $1/MTok heuristic were routed as free and logged at $0.
+   */
+  zeroPricedOnly?: boolean;
 }
 
 export interface CatalogModel {

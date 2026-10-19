@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getSettings, updateSettings } from '@/lib/db/repos/settings';
 import { guard, handle, ok, readBody } from '@/lib/api/admin';
+import { startHealthScheduler } from '@/lib/health/probe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,10 @@ export function PATCH(req: Request): Promise<Response> {
     const parsed = await readBody(req, patchSchema);
     if ('error' in parsed) return parsed.error;
 
-    return ok(updateSettings(parsed.data));
+    const updated = updateSettings(parsed.data);
+    // Picks up a changed probe interval immediately; 0 stops the loop. An
+    // unchanged interval is a no-op.
+    if (parsed.data.healthProbeIntervalSec !== undefined) startHealthScheduler();
+    return ok(updated);
   });
 }

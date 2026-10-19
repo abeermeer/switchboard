@@ -1,5 +1,6 @@
 import type { ApiKey } from '@/types/core';
 import { listApiKeys, touchApiKey, verifyApiKey } from '@/lib/db/repos/apiKeys';
+import { getComboBySlug } from '@/lib/db/repos/combos';
 import { checkRateLimit } from '@/lib/auth/rateLimit';
 import { allowedOrigins, gatewayOriginAllowed, hostAllowed, mayRunOpen } from '@/lib/auth/access';
 import { clientAddress } from '@/lib/auth/session';
@@ -196,15 +197,35 @@ export function authenticate(req: Request): AuthResult {
  */
 export function policyDenied(key: ApiKey | null, requestedModel: string, req?: Request): Response | null {
   if (key === null || key.allowedCombos.length === 0) return null;
-  if (key.allowedCombos.includes(requestedModel)) return null;
-  return jsonError(
-    403,
-    `This API key may only use: ${key.allowedCombos.join(', ')}. "${requestedModel}" is not one of them.`,
-    'permission_error',
-    'model_not_allowed',
-    {},
-    req,
-  );
+  if (!key.allowedCombos.includes(requestedModel)) {
+    return jsonError(
+      403,
+      `This API key may only use: ${key.allowedCombos.join(', ')}. "${requestedModel}" is not one of them.`,
+      'permission_error',
+      'model_not_allowed',
+      {},
+      req,
+    );
+  }
+
+  // The slug has to still name an enabled policy. Once a policy is disabled,
+  // deleted or renamed, its old slug no longer matches anything and the router
+  // treats it as an unknown model, served by the default policy with no cost
+  // ceiling. That turned a key restricted to free-only into an unrestricted
+  // one with a single click in the dashboard.
+  const combo = getComboBySlug(requestedModel);
+  if (combo === null || !combo.enabled) {
+    return jsonError(
+      403,
+      `The policy "${requestedModel}" this key is limited to is disabled or no longer exists. ` +
+        'Re-enable it, or edit the key to allow another policy.',
+      'permission_error',
+      'policy_unavailable',
+      {},
+      req,
+    );
+  }
+  return null;
 }
 
 export function clientMeta(req: Request): { ip: string | null; userAgent: string | null } {

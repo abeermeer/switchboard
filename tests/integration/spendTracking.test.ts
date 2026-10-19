@@ -132,6 +132,33 @@ describe('spend tracking', () => {
     });
   });
 
+  describe('playground reasoning', () => {
+    it('prices reasoning that a provider reports beside completion', async () => {
+      // xAI reports reasoning_tokens outside completion_tokens (the total shows
+      // it). The playground used the older normalizer, which dropped them, so
+      // a reasoning response was priced about 98% low.
+      upstream = stubUpstream([
+        {
+          sse:
+            'data: {"choices":[{"delta":{"content":"Hi"}}]}\n\n' +
+            'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":515,' +
+            '"completion_tokens_details":{"reasoning_tokens":500}}}\n\n' +
+            'data: [DONE]\n\n',
+        },
+      ]);
+
+      const res = await playgroundPost(
+        jsonRequest(`${BASE}/api/playground`, {
+          models: ['llama-3.3-70b-versatile'],
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      );
+      await res.text();
+
+      expect(listRequestLogs({ limit: 10 }).rows[0]?.usage?.completionTokens).toBe(505);
+    });
+  });
+
   describe('per-key budgets', () => {
     it('survive log retention pruning', () => {
       const { key } = createApiKey({ name: 'budgeted', monthlyBudgetUsd: 10 });
