@@ -74,7 +74,8 @@ its work**.
 ```bash
 git clone https://github.com/abeermeer/switchboard.git
 cd switchboard
-npm install && npm run build
+npm install
+npm run build
 npm install -g .          # puts `switchboard` and `sb` on your PATH
 switchboard
 ```
@@ -90,16 +91,21 @@ PowerShell alike (Node 22.13+ still required):
 curl.exe -L -o switchboard.zip https://github.com/abeermeer/switchboard/archive/refs/heads/main.zip
 tar -xf switchboard.zip
 cd switchboard-main
-npm install && npm run build && npm install -g .
+npm install
+npm run build
+npm install -g .
 switchboard
 ```
+
+One command per line on purpose: Windows PowerShell 5.1, the default on Windows 10, rejects
+`&&`.
 
 `npm install -g .` links the command to that folder, so keep it; your data lives elsewhere.
 
 > **Not on npm yet.** The package name is **`switchboard-gateway`** and
 > `npm install -g switchboard-gateway` will be the one-liner once it is published — plain
 > `switchboard` on npm is an unrelated 2022 event-listener library with no executable, so
-> installing *that* leaves you with no command at all. Until the publish lands, use the four
+> installing *that* leaves you with no command at all. Until the publish lands, use the
 > lines above; they install the same artefact CI verifies on every commit.
 
 Your database and encryption key live in your OS application-data directory
