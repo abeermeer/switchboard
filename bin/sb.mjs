@@ -41,7 +41,7 @@ program
 // ── start ────────────────────────────────────────────────────────────────────
 
 program
-  .command('start')
+  .command('start', { isDefault: true })
   .description('start the gateway and dashboard')
   .option('-p, --port <port>', 'port to listen on', process.env.PORT ?? '7272')
   .option(
