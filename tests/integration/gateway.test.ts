@@ -224,7 +224,7 @@ describe('gateway integration', () => {
         jsonRequest(CHAT_URL, { ...HELLO, models: ['anthropic/claude-opus-4.5'], route: 'fallback' }),
       );
 
-      const sent = upstream.calls[0]?.body as Record<string, unknown>;
+      const sent = upstream?.calls[0]?.body as Record<string, unknown>;
       expect(sent.models).toBeUndefined();
       expect(sent.route).toBeUndefined();
     });
