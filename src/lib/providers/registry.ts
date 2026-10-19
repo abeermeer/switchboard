@@ -82,7 +82,8 @@ export function isCoveredByFreeTier(
   provider: ProviderCatalogEntry,
   model: CatalogModel,
 ): boolean {
-  if (model.inputCostPerMTok === 0 && model.outputCostPerMTok === 0) return true;
+  const zeroPriced = model.inputCostPerMTok === 0 && model.outputCostPerMTok === 0;
+  if (zeroPriced && model.unpriced !== true) return true;
   if (provider.freeTier === null || provider.freeTier.zeroPricedOnly === true) return false;
   return blendedCost(model) <= FREE_TIER_COVERS_UP_TO;
 }
@@ -97,6 +98,8 @@ export function inferTier(
     // routing. Pricing them off the list rate would rank a real free tier
     // level with a paid one.
     if (isCoveredByFreeTier(provider, model)) return 'free';
+    // Paid at a rate the catalog cannot state, so neither free nor cheap.
+    if (model.unpriced === true) return 'standard';
     return tierForCost(blendedCost(model));
   }
 

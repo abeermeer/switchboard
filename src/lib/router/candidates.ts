@@ -286,10 +286,20 @@ function evaluate(
     if (!model.features.includes(feature)) return exclude(`Model lacks required feature: ${feature}`);
   }
 
-  if (!fitsContext(model, input.inputTokens, input.maxOutput)) {
+  // Transcription input is audio. Its optional text prompt is cut to the last
+  // 224 tokens upstream; counted against a window the output reservation
+  // already fills, it refused every request that carried one.
+  const tokenWindowApplies = model.modality !== 'audio.transcription';
+  if (tokenWindowApplies && !fitsContext(model, input.inputTokens, input.maxOutput)) {
     return exclude(
       `Context too small — needs ~${input.inputTokens + input.maxOutput} tokens, window is ${model.contextWindow}`,
     );
+  }
+
+  // A per-token ceiling cannot price a per-minute bill, and its zero token
+  // prices would otherwise pass even a $0 ceiling.
+  if (maxCostPerMTok !== null && !free && model.unpriced === true) {
+    return exclude('Billed per audio minute, which a $/MTok ceiling cannot price');
   }
 
   // The ceiling is checked against the effective price, so a $0 ceiling means

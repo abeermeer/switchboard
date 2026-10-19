@@ -76,6 +76,11 @@ function image(
   };
 }
 
+/**
+ * Transcription is billed per audio minute. Left at a bare $0 per token,
+ * OpenAI's paid Whisper ranked as free and the free-only policy, which
+ * promises never to spend money, routed to it.
+ */
 function transcription(id: string, name: string): CatalogModel {
   return {
     id,
@@ -87,6 +92,7 @@ function transcription(id: string, name: string): CatalogModel {
     inputCostPerMTok: 0,
     outputCostPerMTok: 0,
     throughputPrior: 0,
+    unpriced: true,
   };
 }
 

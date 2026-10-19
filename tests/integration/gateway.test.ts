@@ -3,6 +3,7 @@ import { OPTIONS as chatOptions, POST as chatPost } from '@/app/v1/chat/completi
 import { GET as modelsGet } from '@/app/v1/models/route';
 import { POST as moderationsPost } from '@/app/v1/moderations/route';
 import { POST as speechPost } from '@/app/v1/audio/speech/route';
+import { POST as transcriptionsPost } from '@/app/v1/audio/transcriptions/route';
 import { POST as bootstrapPost } from '@/app/api/system/bootstrap/route';
 import { createConnection } from '@/lib/db/repos/connections';
 import { setCredential } from '@/lib/db/repos/credentials';
@@ -378,6 +379,46 @@ describe('gateway integration', () => {
       expect(upstream.calls[0]?.url).toBe('https://api.openai.com/v1/moderations');
       expect((upstream.calls[0]?.body as { model?: string }).model).toBe('omni-moderation-latest');
       expect(res.headers.get('x-switchboard-cost-usd')).toBe('0.000000');
+    });
+  });
+
+  // ── transcriptions ────────────────────────────────────────────────────────
+
+  describe('POST /v1/audio/transcriptions', () => {
+    function audioForm(fields: Record<string, string> = {}): Request {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array([0, 1, 2, 3])], { type: 'audio/wav' }), 'clip.wav');
+      for (const [key, value] of Object.entries(fields)) form.append(key, value);
+      return new Request(`${BASE_URL}/v1/audio/transcriptions`, { method: 'POST', body: form });
+    }
+
+    beforeEach(() => {
+      const groq = createConnection({ providerId: 'groq' });
+      setCredential(groq.id, 'gsk_test_audio');
+    });
+
+    it('transcribes through a free-tier provider', async () => {
+      upstream = stubUpstream([{ status: 200, json: { text: 'hello' } }]);
+
+      const res = await transcriptionsPost(audioForm({ model: 'whisper-large-v3-turbo' }));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ text: 'hello' });
+      expect(upstream.calls[0]?.url).toBe('https://api.groq.com/openai/v1/audio/transcriptions');
+    });
+
+    it('accepts the optional prompt, which used to fail the context check', async () => {
+      // The prompt is text, so it was estimated as input tokens against a 448
+      // token window the output reservation already filled. Every request that
+      // carried one was refused before it reached a provider.
+      upstream = stubUpstream([{ status: 200, json: { text: 'hello' } }]);
+
+      const res = await transcriptionsPost(
+        audioForm({ model: 'whisper-large-v3-turbo', prompt: 'Switchboard, Kubernetes, Groq, Cerebras' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(upstream.calls).toHaveLength(1);
     });
   });
 

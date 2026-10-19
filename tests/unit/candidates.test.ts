@@ -362,6 +362,29 @@ describe('router/expandCandidates', () => {
       expect(flash?.tier).not.toBe('free');
     });
 
+    it('keeps free-only off paid transcription, which has no per-token price', () => {
+      // Whisper is billed per audio minute. At $0 per token, OpenAI's paid
+      // whisper-1 ranked as free and passed the $0 ceiling.
+      connect('openai');
+      connect('groq');
+
+      const res = expandCandidates(ex('free-only', { modality: 'audio.transcription', inputTokens: 0 }));
+      const byProvider = new Map(res.candidates.map((c) => [c.providerId, c]));
+
+      expect(byProvider.get('groq')?.excludedReason).toBeNull();
+      expect(byProvider.get('groq')?.tier).toBe('free');
+      expect(byProvider.get('openai')?.excludedReason).toMatch(/audio minute/);
+      expect(byProvider.get('openai')?.tier).toBe('standard');
+    });
+
+    it('still routes paid transcription when no ceiling applies', () => {
+      connect('openai');
+
+      const res = expandCandidates(ex('auto', { modality: 'audio.transcription', inputTokens: 0 }));
+
+      expect(res.candidates.find((c) => c.modelId === 'whisper-1')?.excludedReason).toBeNull();
+    });
+
     it('ignores a disabled default policy', () => {
       connect('groq');
       const auto = expandCandidates(ex('auto')).combo;

@@ -64,6 +64,13 @@ export interface CatalogModel {
   outputCostPerMTok: number;
   /** Rough tokens/sec, used as a latency prior before real data exists. */
   throughputPrior: number;
+  /**
+   * Billed in a unit the catalog cannot express (audio minutes), so the zero
+   * token prices above are a missing price, not a free one. Such a model is
+   * free only inside a provider's free tier, and a cost ceiling refuses it
+   * everywhere else.
+   */
+  unpriced?: boolean;
 }
 
 export interface ProviderCatalogEntry {
