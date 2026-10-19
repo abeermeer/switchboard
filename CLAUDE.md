@@ -18,7 +18,7 @@ architecture from there.
 ```bash
 npm run dev          # dev server on 127.0.0.1:7272
 npm run typecheck    # tsc --noEmit — must be clean before any commit
-npm run test:run     # vitest, ~1,111 tests, must be green before any commit
+npm run test:run     # vitest, ~1,134 tests, must be green before any commit
 npm run build        # production build; CI runs this on 4 platform/version combos
 npm start            # serve the production build through server.mjs
 npm run icons            # regenerate the desktop icons from the product mark
@@ -43,6 +43,11 @@ it. A request enters at `src/app/v1/*`, goes through the shared pipeline in
 routing itself is three steps in `src/lib/router/`: `candidates.ts` expands the client's
 `model` string into every connection+model pair that could serve it, `score.ts` ranks them
 on eight weighted factors, and `execute.ts` walks the ranked list until one succeeds.
+`src/instrumentation.ts` runs once at boot: it seeds the four starter policies and starts
+the health loop (probes, log retention, lockout and latency sweeps). Nothing else starts
+that loop; before this file existed it never ran in a real install. Next's config is
+`next.config.mjs`, not `.ts`: a TypeScript config needs Next's native SWC binary at every
+start, which a build packaged for another architecture lacks.
 Everything persists through `src/lib/db/repos/`.
 
 Full detail: [docs/architecture.md](docs/architecture.md).
@@ -103,8 +108,12 @@ Do not "fix" these:
 - **The gateway runs unauthenticated until the first API key exists, for local callers
   only.** A fresh install has to be usable before the user has opened the dashboard. Remote
   callers need a key regardless, unless `SWITCHBOARD_ALLOW_REMOTE` is set.
-- **A request relayed by any proxy counts as remote**, even from 127.0.0.1. A reverse proxy
-  on the same machine would otherwise make the whole internet look like localhost.
+- **A request carrying a forwarding header counts as remote**, even from 127.0.0.1
+  (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`). A reverse proxy on the same machine would
+  otherwise make the whole internet look like localhost. `server.mjs` also requires the
+  Host to name this machine. That still leaves one hole no code can close: a proxy that
+  sends no forwarding header and a loopback Host, which is nginx's default `proxy_pass`.
+  The docs tell users to add the header; do not claim "any proxy" is detected.
 - **Only IP literals, `localhost` and `SWITCHBOARD_ALLOWED_HOSTS` are answered**, and
   writes from another origin are refused. That is the DNS rebinding and CSRF defence for a
   loopback-bound server; both attacks arrive from 127.0.0.1.
@@ -123,6 +132,18 @@ Do not "fix" these:
   both misrank the free-first ladder and overstate the user's spend.
 - **An empty combo member chain means "consider every eligible connection."** It is the
   default and usually correct, not an unconfigured state.
+- **A key restricted to a policy that no longer exists, or is disabled, gets 403
+  `policy_unavailable`** rather than the default policy. Falling through would route the
+  stale slug as an unknown model, with no cost ceiling, which turned a `free-only` key into
+  an unrestricted one.
+- **OpenRouter's free tier is `zeroPricedOnly`.** It covers only the `:free` variants; its
+  paid models are cheap enough to pass the $1/MTok free-tier heuristic, which made
+  `free-only` spend money while logging $0.
+- **Transcription models are `unpriced`.** Whisper is billed per audio minute, so its $0
+  token prices are a missing price. It counts as free only inside a provider's free tier
+  (Groq), and every cost ceiling refuses it elsewhere (OpenAI). The token-window check
+  skips audio too: the optional text prompt used to fill a 448-token window and refuse the
+  request.
 - **The npm package is `switchboard-gateway`, not `switchboard`.** The short name belongs to
   an unrelated 2022 library with no `bin`, so `npm install -g switchboard` installs that and
   leaves the user with no command — which is exactly what happened. The *commands* are still
@@ -164,7 +185,7 @@ npm run test:run     # once
 npm run test:ci      # with coverage
 ```
 
-~1,111 tests in `tests/`, on vitest. Structure:
+~1,134 tests in `tests/`, on vitest. Structure:
 
 - `tests/setup.ts` repoints `SWITCHBOARD_DATA_DIR` at a temp directory **before any module
   is imported**. This is load-bearing: the master key and the DB handle cache in module
@@ -262,7 +283,14 @@ Be honest about these rather than papering over them:
   until its window expires.
 - **No audit log of admin actions** — key creation, connection changes and token rotation
   are not recorded anywhere.
-- **No graceful shutdown** — SIGTERM kills in-flight streams rather than draining them.
+- **Shutdown drains for 10 seconds only.** SIGTERM stops new connections and gives
+  in-flight requests 10 s; a longer stream is cut.
+- **The Claude 5.5 models are not in the catalog.** They reject the sampling parameters
+  and forced `tool_choice` the Anthropic adapter passes through; they need adapter support
+  first. Claude Sonnet 4.5 retires 2026-11-30 and must be removed from the catalog then.
+- **Paid transcription logs $0.** Spend and budgets cannot see per-minute billing.
+- **A same-machine proxy with no forwarding header looks local.** See the deliberate list
+  above; documented, not fixable in code.
 
 [SESSION_SUMMARY.md](SESSION_SUMMARY.md) records what changed in each session and why.
 Roadmap for the gaps lives in the audit documents the user maintains outside the repo.

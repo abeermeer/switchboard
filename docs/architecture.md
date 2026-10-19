@@ -46,7 +46,7 @@ POST /v1/chat/completions
 
 Every shared shape lives here and nothing else imports upward into it. Adapters,
 repositories, the router and the dashboard all speak these types, which is what keeps
-the wire format of eleven different providers from leaking into the UI.
+the wire format of sixteen different providers from leaking into the UI.
 
 ### Persistence — `src/lib/db/`
 
@@ -68,6 +68,8 @@ Tables:
 | `health`, `latency_samples`, `model_lockouts` | Live resilience state |
 | `request_log`, `request_payloads` | Per-request history and decision traces |
 | `usage_buckets` | Hourly rollups so charts never scan the log |
+| `api_key_spend` | Month-to-date spend per client key, written in the same transaction as the log row |
+| `rate_limit_hits` | Per-second hit counts behind each key's rate limit |
 | `discovered_models` | Models pulled live from a provider |
 | `settings` | Key/value configuration |
 
@@ -103,6 +105,12 @@ The breaker classifies failures rather than counting them uniformly:
 Cooldown is `base × 2^(opens−1)`, capped at 15 minutes, with ±20% jitter so a fleet of
 clients does not stampede a recovering provider simultaneously.
 
+`src/instrumentation.ts` starts the background health loop when the server boots, and seeds
+the four starter policies there too. The loop probes connections, prunes latency samples
+and expired lockouts, and enforces log retention. Before it was wired up nothing called
+`startHealthScheduler`, so none of that ran in a real install, and policies existed only
+once a dashboard page had rendered.
+
 ### Router — `src/lib/router/`
 
 **`candidates.ts`** turns the client's `model` string into every connection+model pair that
@@ -111,9 +119,11 @@ could serve it:
 | Input | Resolution |
 | --- | --- |
 | A policy slug | That policy's members, or all connections when the chain is empty |
-| `auto` / unknown | The default policy |
+| `auto` | The default policy |
+| An unknown model | The default policy, flagged with `x-switchboard-substituted` |
 | `provider/model` | Pinned to that provider, still spread across its connections |
-| A bare model id | Every connection offering it — this is the fallback story |
+| A catalog id containing a slash | Every connection offering it (`openai/gpt-oss-120b` on Groq); tried alongside the pin reading |
+| A bare model id | Every connection offering it; this is the fallback story |
 
 Filtering records an `excludedReason` rather than dropping silently, because the decision
 trace is only useful if it can show what lost and why.
@@ -132,8 +142,10 @@ and never retries a stream that has already emitted a byte.
 ### API surface
 
 `src/app/v1/` is the OpenAI-compatible gateway. `src/app/api/` is the management API the
-dashboard consumes — every handler is guarded by `requireLocalOrToken`, validates with zod,
-and returns a clean error rather than a stack trace.
+dashboard consumes. Every handler calls `guard()` (`adminGate` in `src/lib/auth/access.ts`:
+Host check, cross-site write check, then this machine or the dashboard token), validates
+with zod, and returns a clean error rather than a stack trace. `src/proxy.ts` runs the same
+gate first; the handler-level call is what keeps a route safe if the proxy is ever bypassed.
 
 `/api/events` is a single Server-Sent Events stream feeding the whole dashboard. Every live
 widget subscribes through one client-side context; eight panels would otherwise hold eight
@@ -146,11 +158,15 @@ Actual cost, in `src/lib/usage/cost.ts`:
 ```
 (prompt − cached) × inputRate
   + cached × inputRate × 0.10
-  + (completion + reasoning) × outputRate
+  + completion × outputRate
 ```
 
 all per 1M tokens. Cached tokens are already inside `promptTokens` for every provider that
-reports them, so they are subtracted before billing at full rate.
+reports them, so they are subtracted before billing at full rate. Reasoning tokens are
+already inside `completionTokens`: OpenAI-shaped providers report them that way, and the
+adapters fold Gemini's separately reported thinking tokens in at normalization.
+`reasoningTokens` is a breakdown for display, never added on top; doing so billed every
+reasoning model's thinking twice.
 
 `settleRequest(providerId, modelId, usage)` is what the gateway actually calls. It resolves
 the provider first, and returns **$0** when the model is covered by that provider's free

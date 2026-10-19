@@ -55,7 +55,9 @@ docker exec switchboard node bin/sb.mjs token
 # then visit http://127.0.0.1:7272/dashboard?token=<token> once
 ```
 
-or, when the port is published on loopback only, add `-e SWITCHBOARD_ALLOW_REMOTE=1`.
+Do not set `SWITCHBOARD_ALLOW_REMOTE=1` to skip that step. Other containers on the same
+Docker network reach the gateway directly, whatever `-p` says, and the flag would give each
+of them the dashboard and an open gateway.
 
 The image is `node:24-slim`, multi-stage, and runs as the unprivileged `node` user.
 Because storage is `node:sqlite` there is no native module to compile, so no
@@ -116,11 +118,20 @@ Even so, put it behind a reverse proxy with TLS, or a WireGuard/Tailscale interf
 not expose it directly to the internet. Anyone who reaches the management API can read
 every prompt you have logged.
 
-If you proxy it, every relayed request counts as remote, because the proxy is the only
-thing the socket sees. Either keep using the token, or set `SWITCHBOARD_ALLOW_REMOTE=1` if
-the proxy enforces its own authentication. Add the proxy's hostname to
-`SWITCHBOARD_ALLOWED_HOSTS`, keep the original `Host`, and disable response buffering so
-streaming works:
+If you proxy it, the forwarding header is what makes a relayed request count as remote.
+`server.mjs` treats any request carrying `X-Forwarded-For`, `Forwarded` or `X-Real-IP` as
+remote. The socket alone cannot tell: a proxy on the same machine connects from
+`127.0.0.1`.
+
+**nginx sends none of those headers unless told to**, and its default `Host` is the
+upstream address. A bare `proxy_pass http://127.0.0.1:7272;` therefore makes every request
+from the internet look like it came from this machine, with full dashboard access. Keep the
+`X-Forwarded-For` line in the block below. Caddy, Traefik and Apache's `mod_proxy` send it
+by default; check anything else before exposing it.
+
+Relayed requests then need the token, or set `SWITCHBOARD_ALLOW_REMOTE=1` if the proxy
+enforces its own authentication. Add the proxy's hostname to `SWITCHBOARD_ALLOWED_HOSTS`,
+keep the original `Host`, and disable response buffering so streaming works:
 
 ```nginx
 location / {
@@ -160,6 +171,13 @@ Closing the window hides to the tray; the gateway keeps serving. Quit from the t
 Icons are generated into `electron/assets/` by `npm run icons`. CI's desktop workflow
 builds the Windows and Linux packages, launches each one, and waits for its gateway to
 answer, so an installer that cannot start its server fails the build.
+
+## Stopping
+
+`SIGTERM` or `SIGINT` (Ctrl+C) stops accepting connections and gives in-flight requests up
+to 10 seconds to finish; a stream still running after that is cut. `docker stop` also waits
+10 seconds before it kills the container, so the two line up. A long completion in flight
+during a restart can still be lost.
 
 ## Upgrading
 

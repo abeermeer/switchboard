@@ -28,7 +28,7 @@ Ubuntu and Windows.
 
 ```bash
 npm run typecheck   # tsc --noEmit, strict
-npm run test:run    # vitest, ~1,111 tests
+npm run test:run    # vitest, ~1,134 tests
 npm run build
 ```
 
@@ -102,7 +102,9 @@ Each of these fails silently or at build time rather than at typecheck:
 
 - Gateway runs unauthenticated until the first API key is created, for local callers only.
 - Production goes through `server.mjs`, never bare `next start`; "local" comes from its
-  socket verdict, and a request relayed by any proxy counts as remote.
+  socket verdict, and a request carrying a forwarding header counts as remote. A
+  same-machine proxy that sends none (nginx's default) still looks local; that is
+  documented, not detectable.
 - Only IP literals, `localhost` and `SWITCHBOARD_ALLOWED_HOSTS` are answered, and
   cross-origin writes to the admin API are refused (DNS rebinding and CSRF).
 - `next`, `react` and `react-dom` are pinned exactly: the package ships a prebuilt `.next`.
@@ -112,6 +114,10 @@ Each of these fails silently or at build time rather than at typecheck:
 - A stream that has emitted a byte is never retried.
 - Free-tier models settle at $0 (`settleRequest` in `src/lib/usage/cost.ts`).
 - An empty combo member chain means "every eligible connection".
+- A key restricted to a deleted or disabled policy gets 403 `policy_unavailable`, never the
+  default policy.
+- OpenRouter's free tier covers only `:free` models (`zeroPricedOnly`), and transcription
+  models are `unpriced`: free only inside a free tier, refused by every cost ceiling.
 - The CLI pins `SWITCHBOARD_DATA_DIR` so a global install never stores data in
   `node_modules`.
 - `/v1` sends no `Access-Control-Allow-Origin` unless `SWITCHBOARD_CORS_ORIGINS` is set.
@@ -130,7 +136,8 @@ written. Never log a credential; if you extend the redaction rules, extend
 
 The same `redact()` runs before request payloads are written to the database
 (`src/lib/db/repos/log.ts`), so a client's own key never lands on disk in plain text.
-Retention is applied on the health tick; `logRetentionDays: 0` means keep forever.
+Retention is applied on the health tick, which `src/instrumentation.ts` starts at boot;
+`logRetentionDays: 0` means keep forever.
 
 ## Adding a provider
 

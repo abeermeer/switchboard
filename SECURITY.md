@@ -4,6 +4,8 @@
 
 Do not open a public issue. Report privately through
 [GitHub Security Advisories](https://github.com/abeermeer/switchboard/security/advisories/new).
+If that form is unavailable, open an issue that says only that you have a security report
+and asks for a private channel, with no details, and one will be arranged.
 
 Include what you did, what happened, and what you expected. A proof of concept helps.
 Expect an acknowledgement within a few days.
@@ -32,8 +34,9 @@ nothing and cost a hash on every request.
 
 **Network exposure.** `server.mjs` listens on `127.0.0.1` unless `SWITCHBOARD_HOST` says
 otherwise. Whether a caller is local is read from the socket, not from `X-Forwarded-For`,
-and a request relayed by any proxy counts as remote. (Before this, the forwarded header
-decided it, and a remote client that sent `X-Forwarded-For: 127.0.0.1` got full admin.)
+and any request carrying a forwarding header (`X-Forwarded-For`, `Forwarded`,
+`X-Real-IP`) counts as remote. (Before this, the forwarded header decided it, and a remote
+client that sent `X-Forwarded-For: 127.0.0.1` got full admin.)
 
 **The dashboard and management API.** Every page and admin route, enforced in
 `src/proxy.ts` and again in each handler, refuses a remote caller unless it presents the
@@ -59,6 +62,11 @@ Be clear-eyed about these:
   decrypt your provider credentials. Its `0600` permissions are the only barrier, and on
   Windows those are advisory.
 - **There is no rate limit on the dashboard**, only on gateway API keys.
+- **A same-machine reverse proxy that sends no forwarding header looks local.** Its
+  connection comes from `127.0.0.1`, and nothing else distinguishes it. nginx is the common
+  case: by default it sends no `X-Forwarded-For` and passes the upstream address as `Host`,
+  so a bare `proxy_pass` gives the internet the dashboard. Configure the header; see
+  [docs/deployment.md](docs/deployment.md#exposing-it-beyond-localhost).
 - **The gateway runs open until you create an API key, for this machine.** This is
   deliberate, so a fresh install is usable before you have visited the dashboard. Remote
   callers always need a key. But any other user or process on the same machine can use an

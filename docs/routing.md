@@ -3,7 +3,7 @@
 ## Policies
 
 A policy — `combo` in the API — is a model name your clients can send. Four ship by default
-and are created on first run.
+and are created when the server first starts (`src/instrumentation.ts`).
 
 | Slug | Strategy | Purpose |
 | --- | --- | --- |
@@ -22,8 +22,12 @@ default and usually the right answer — pin members only when you want a specif
 | `auto` | The default policy |
 | A policy slug (`free-only`) | That policy |
 | A bare model id (`llama-3.3-70b-versatile`) | Every connection offering it |
-| `provider/model` (`groq/llama-3.3-70b`) | Pinned provider, still spread across its connections |
-| Anything unrecognised | Falls through to the default policy |
+| `provider/model` (`groq/llama-3.3-70b-versatile`) | Pinned provider, still spread across its connections |
+| A catalog id that contains a slash (`openai/gpt-oss-120b` on Groq) | Every connection offering that exact id; when it is also a valid pin, both |
+| Anything unrecognised | Routed through the default policy, with an `x-switchboard-substituted` header naming what you asked for |
+
+The default policy only applies to that last row. A slug, a pin or a catalog id is served
+as asked even when the default policy has its own member list.
 
 ## Strategies
 

@@ -18,7 +18,12 @@ base URL.
 | `GET` | `/v1/models` | |
 | `GET` | `/v1/models/{model}` | |
 
-Every endpoint answers `OPTIONS` with permissive CORS.
+No CORS by default: server-side SDK clients are unaffected by it, and a wildcard would let
+any page in your browser spend your credentials. Browser origins are opted in with
+`SWITCHBOARD_CORS_ORIGINS`; a browser request from any other origin is refused with 403
+`origin_not_allowed`. Requests addressed to a hostname that is not an IP address,
+`localhost` or listed in `SWITCHBOARD_ALLOWED_HOSTS` get 403 `host_not_allowed` (DNS
+rebinding protection).
 
 ### Authentication
 
@@ -28,10 +33,15 @@ Authorization: Bearer sb-live-...
 
 `x-api-key` is also accepted, for Anthropic-shaped clients.
 
-**When no API key exists yet, the gateway runs open.** A fresh local install has to be
-usable the moment it boots — requiring a key before the first request would mean you
-cannot test anything until you have visited the dashboard. Create a key and enforcement
-begins immediately.
+**When no API key exists yet, the gateway runs open, for this machine only.** A fresh
+local install has to be usable the moment it boots, before you have visited the
+dashboard. Callers from other machines need a key regardless (unless
+`SWITCHBOARD_ALLOW_REMOTE=1`). Create a key and enforcement begins immediately for
+everyone.
+
+A key restricted to named policies may only send those slugs as `model`; anything else is
+403 `model_not_allowed`, and a slug whose policy was disabled or deleted is 403
+`policy_unavailable`.
 
 ### Validation
 
@@ -83,6 +93,7 @@ The OpenAI error envelope, byte for byte:
 | `rate_limit`, `quota_exceeded` | 429 (with `Retry-After`) |
 | `bad_request`, `context_length` | 400 |
 | `unsupported` | 404 |
+| `unavailable` (every candidate is behind an open breaker or a 429 lockout) | 503 |
 | `timeout` | 504 |
 | everything else | 502 |
 
@@ -90,8 +101,12 @@ The OpenAI error envelope, byte for byte:
 
 ## Management — `/api`
 
-Consumed by the dashboard. Guarded by `requireLocalOrToken`: loopback requests pass
-freely; anything else needs the dashboard token and `SWITCHBOARD_ALLOW_REMOTE=1`.
+Consumed by the dashboard. Every route (and every dashboard page, via `src/proxy.ts`) is
+gated: a request from this machine passes; any other needs the dashboard token, sent as
+`x-switchboard-token`, as a bearer token, or as the cookie that `/dashboard?token=` sets.
+`SWITCHBOARD_ALLOW_REMOTE=1` instead admits remote callers without the token, for hosts
+behind your own authentication. Writes sent from another site's page are refused, and so
+is a Host that could be DNS rebinding.
 
 ### System
 
@@ -99,6 +114,7 @@ freely; anything else needs the dashboard token and `SWITCHBOARD_ALLOW_REMOTE=1`
 | --- | --- | --- |
 | `GET` | `/api/system/status` | Version, uptime, provider counts, today's spend |
 | `POST` | `/api/system/bootstrap` | Idempotent first-run setup |
+| `GET` `POST` | `/api/system/token` | Read · rotate the dashboard token. This machine only, whatever else the caller holds |
 
 ### Providers and connections
 

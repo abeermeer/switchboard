@@ -12,7 +12,7 @@ These need no payment method and can serve real work.
 | --- | --- | --- | --- | --- |
 | Groq | `groq` | 14,400 req/day on small models | 9 | chat, transcription |
 | Cerebras | `cerebras` | 1M tokens/day, 30 req/min | 6 | chat |
-| Google Gemini | `google` | AI Studio: 250 req/day on Flash | 8 | chat, embeddings, images |
+| Google Gemini | `google` | AI Studio: 250 req/day on Flash | 5 | chat, embeddings, images |
 | Mistral AI | `mistral` | Experiment plan: 1B tokens/month | 10 | chat, embeddings |
 | OpenRouter | `openrouter` | 50 req/day on `:free` models | 8 | chat |
 | NVIDIA NIM | `nvidia-nim` | 1,000 credits, 40 req/min | 7 | chat, embeddings |
@@ -32,8 +32,8 @@ for when your cloud quotas run dry.
 
 | Provider | Slug | Models | Modalities |
 | --- | --- | --- | --- |
-| OpenAI | `openai` | 11 | chat, embeddings, images, transcription |
-| Anthropic | `anthropic` | 6 | chat |
+| OpenAI | `openai` | 12 | chat, embeddings, images, transcription, moderation |
+| Anthropic | `anthropic` | 3 | chat |
 | DeepSeek | `deepseek` | 3 | chat |
 | Together AI | `together` | 9 | chat, embeddings, images |
 | Fireworks AI | `fireworks` | 9 | chat, embeddings, images |
@@ -85,12 +85,24 @@ In practice that captures exactly the right set:
 | --- | --- | --- |
 | `llama-3.1-8b-instant` | Groq | free |
 | `gemini-2.5-flash-lite` | Google | free |
-| `qwen-3-235b-a22b-instruct` | Cerebras | free |
-| `moonshotai/kimi-k2-instruct` | Groq | standard — $1.50, above the threshold |
-| `gemini-2.5-pro` | Google | standard — $3.44, a flagship |
-| `deepseek-chat` | DeepSeek | cheap — no free tier at all |
+| `qwen-3-235b-a22b-instruct-2507` | Cerebras | free |
+| `moonshotai/kimi-k2-instruct-0905` | Groq | standard: $1.50, above the threshold |
+| `gemini-2.5-pro` | Google | standard: $3.44, a flagship |
+| `deepseek-chat` | DeepSeek | cheap: no free tier at all |
 
-This is why a `free-only` policy still has 17 models to choose from rather than none.
+This is why a `free-only` policy still has dozens of chat models to choose from (44 with
+every free-tier provider connected) rather than none.
+
+Two exceptions keep the threshold from spending money:
+
+- **OpenRouter** covers only its `:free` variants. Its paid models are priced low enough
+  to pass the threshold, so the catalog marks its free tier `zeroPricedOnly` and nothing
+  else there counts as free.
+- **Transcription** is billed per audio minute, which a per-token catalog cannot express.
+  Whisper is marked `unpriced`: it is free inside a provider's free tier (Groq), paid at an
+  unknown rate everywhere else (OpenAI), and refused by any cost ceiling, including
+  `free-only`'s $0 one. Logged spend for paid transcription is $0, because there is no
+  token count to price; budgets do not see it.
 
 ## The same model, several providers
 
