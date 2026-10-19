@@ -319,6 +319,35 @@ describe('router/expandCandidates', () => {
       expect(res.unrecognizedModel).toBe(true);
     });
 
+    it('serves a catalog id that contains a slash instead of reading it as a pin', () => {
+      // Groq's own model id starts with "openai/". Treated as a pin it answered
+      // 404 'not available on OpenAI', though /v1/models advertised it.
+      connect('groq');
+
+      const res = expandCandidates(ex('openai/gpt-oss-120b'));
+
+      expect(res.hardError).toBeNull();
+      expect(res.candidates.map((c) => `${c.providerId}:${c.modelId}`)).toEqual(['groq:openai/gpt-oss-120b']);
+    });
+
+    it('serves an OpenRouter id even with no connection for the provider its prefix names', () => {
+      connect('openrouter');
+
+      const res = expandCandidates(ex('openai/gpt-4o-mini'));
+
+      expect(res.hardError).toBeNull();
+      expect(res.candidates.map((c) => c.providerId)).toEqual(['openrouter']);
+    });
+
+    it('offers both readings when both exist, which is a free failover', () => {
+      connect('openai');
+      connect('openrouter');
+
+      const res = expandCandidates(ex('openai/gpt-4o-mini'));
+
+      expect(new Set(res.candidates.map((c) => c.providerId))).toEqual(new Set(['openai', 'openrouter']));
+    });
+
     it('ignores a disabled default policy', () => {
       connect('groq');
       const auto = expandCandidates(ex('auto')).combo;

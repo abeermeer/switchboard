@@ -605,6 +605,10 @@ describe('classifyHttpError', () => {
     'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).',
     'Prompt contains 40000 tokens, too large for model with 32768 maximum context length',
     'context_length_exceeded',
+    // Output caps: another model with a larger one can still serve these.
+    'max_tokens: 100000 > 64000, which is the maximum allowed number of output tokens for claude-haiku-4-5-20251001',
+    'max_tokens must be less than or equal to 8192',
+    'inputs tokens + max_new_tokens must be <= 8193',
   ])('recognises the provider phrasing "%s" as context_length', (message) => {
     expect(classifyHttpError(400, JSON.stringify({ error: { message } }), noHeaders()).kind).toBe(
       'context_length',
@@ -612,7 +616,7 @@ describe('classifyHttpError', () => {
   });
 
   it.each([
-    'max_tokens must be less than or equal to 8192',
+    'max_tokens must be a positive integer',
     'maximum value for temperature is 2',
     'Invalid token in JSON at position 5',
   ])('does not mistake "%s" for an over-long prompt', (message) => {

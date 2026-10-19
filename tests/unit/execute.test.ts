@@ -147,6 +147,37 @@ describe('router/executeRoute', () => {
     });
   });
 
+  describe('attempt budget', () => {
+    it('does not spend attempts on candidates it skips, so a failed trial still falls back', async () => {
+      // Groq's eight free models rank first even with the half-open penalty.
+      // Its trial fails, the breaker reopens, and the remaining Groq models are
+      // skipped. Those skips used to use up maxAttempts and the walk ended
+      // without ever reaching OpenAI.
+      const groq = connect('groq');
+      connect('openai');
+      lapsedOpen(groq);
+      const urls: string[] = [];
+      vi.stubGlobal('fetch', (url: string) => {
+        urls.push(url);
+        if (url.includes('groq')) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: { message: 'upstream exploded' } }), {
+              status: 500,
+              headers: { 'content-type': 'application/json' },
+            }),
+          );
+        }
+        return Promise.resolve(okBody());
+      });
+
+      const out = await run(ranked());
+
+      expect(urls.filter((u) => u.includes('groq'))).toHaveLength(1);
+      expect(out.winningAttempt).not.toBeNull();
+      expect(out.attempts[out.winningAttempt!]?.providerId).toBe('openai');
+    });
+  });
+
   describe('everything temporarily out', () => {
     it('answers 503, not 404, when every candidate is behind an open breaker', async () => {
       const id = connect('groq');
@@ -156,6 +187,21 @@ describe('router/executeRoute', () => {
 
       expect(out.error?.kind).toBe('unavailable');
       expect(statusForErrorKind(out.error!.kind)).toBe(503);
+    });
+
+    it('answers 404, not "retry shortly", when no candidate could serve it even once recovered', async () => {
+      const id = connect('groq');
+      upsertHealthRow({ ...getHealthRow(id), breaker: 'open', cooldownUntil: Date.now() + 60_000, openCount: 1 });
+      const expanded = expandCandidates({ ...ex(), inputTokens: 5_000_000 });
+      const candidates = scoreCandidates(expanded.candidates, 'free-first', {
+        strategy: 'free-first',
+        combo: null,
+        rotation: 0,
+      });
+
+      const out = await run(candidates);
+
+      expect(out.error?.kind).toBe('unsupported');
     });
 
     it('still answers 404 when nothing could ever serve the request', async () => {

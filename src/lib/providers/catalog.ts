@@ -506,17 +506,21 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     requiresKey: true,
     blurb: 'Claude. Long-horizon agentic work, prompt caching, and assistant prefill.',
     // Prices, windows and retirement dates from platform.claude.com (pricing,
-    // models overview, model deprecations), read 2026-10-18. Claude 3.7 Sonnet
+    // model deprecations), read 2026-10-18. Claude 3.7 Sonnet
     // and 3.5 Haiku retired 2026-02-19 and Opus 4.1 on 2026-08-05; they are gone
     // rather than left to 404. Sonnet 4.5 is deprecated and retires 2026-11-30.
     //
     // No json_mode: the Anthropic adapter does not translate response_format,
     // so a JSON-mode request routed here had the setting silently dropped.
-    // Haiku 5.5 is left out because its price steps up past 100K-token prompts,
-    // which a single per-MTok figure cannot represent.
+    //
+    // The 5.5 generation is not listed yet. Opus 5.5 rejects temperature, top_p
+    // and top_k, Sonnet 5.5 rejects non-default values, and both reject a
+    // forced tool_choice. The adapter passes all of those through from OpenAI
+    // requests, so ordinary calls failed, and each failure counted against the
+    // whole Anthropic connection's breaker. Add them with adapter support for
+    // those limits. Haiku 5.5 additionally steps up its price past 100K-token
+    // prompts, which a single per-MTok figure cannot represent.
     models: [
-      chat('claude-opus-5-5', 'Claude Opus 5.5', 1_000_000, 128_000, 4.0, 20.0, 60, ANTHROPIC),
-      chat('claude-sonnet-5-5', 'Claude Sonnet 5.5', 1_000_000, 128_000, 2.0, 10.0, 80, ANTHROPIC),
       chat('claude-opus-4-5-20251101', 'Claude Opus 4.5', 200_000, 64_000, 5.0, 25.0, 60, [...ANTHROPIC, 'prefill']),
       chat('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', 200_000, 64_000, 3.0, 15.0, 75, [...ANTHROPIC, 'prefill']),
       chat('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 200_000, 64_000, 1.0, 5.0, 140, [...ANTHROPIC, 'prefill']),

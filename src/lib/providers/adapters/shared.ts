@@ -274,9 +274,14 @@ export function extractErrorMessage(body: unknown, fallback: string): string {
  * must be <= 8192" or "maximum value for temperature is 2" became
  * context_length: retried on every remaining provider and counted against
  * each one's breaker, for a request that could never succeed.
+ *
+ * An output cap is a size limit too, and one another model can meet: Haiku
+ * stops at 64K output tokens where Sonnet does not. So "max_tokens: 100000 >
+ * 64000" stays context_length and the walk moves to a bigger model, while
+ * "max_tokens must be a positive integer" is a malformed request.
  */
 const CONTEXT_LENGTH_RE =
-  /context.?(length|window|limit)|maximum context|too many (input )?tokens|(prompt|input|message)s? (is|are) too long|reduce the length|too large for (the )?model|token limit|exceeds? the (model'?s )?(maximum|max|context)/i;
+  /context.?(length|window|limit)|maximum context|too many (input )?tokens|(prompt|input|message)s? (is|are) too long|reduce the length|too large for (the )?model|token limit|exceeds? the (model'?s )?(maximum|max|context)|maximum allowed number of output tokens|max(_completion|_new|_output)?_tokens\b[^.]{0,60}?(must be (less|<=|at most|no (more|greater))|exceeds?|greater than|too (large|high|big)|> ?\d)/i;
 const QUOTA_RE = /quota|billing|credit|insufficient.?(balance|funds)|payment|spend limit/i;
 const MODEL_MISSING_RE = /model|not found|does not exist|unsupported|unknown|no such/i;
 

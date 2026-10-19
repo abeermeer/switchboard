@@ -136,52 +136,19 @@ function collectPairings(input: ExpandInput): PairingSet {
     return { ...comboPairings(input, named, connections), combo: named, unrecognized: false };
   }
 
-  // "provider/model" pins the provider but still spreads across every
-  // connection the user holds for it, so a second key still provides failover.
-  const slash = input.requestedModel.indexOf('/');
-  if (slash > 0) {
-    const providerId = input.requestedModel.slice(0, slash);
-    const modelId = input.requestedModel.slice(slash + 1);
-    const provider = getProvider(providerId);
-
-    if (provider !== null) {
-      const model = findModel(providerId, modelId);
-      if (model === null) {
-        return {
-          pairs: [],
-          hardError: `Model "${modelId}" is not available on ${provider.name}.`,
-          combo: null,
-          unrecognized: false,
-        };
-      }
-      const pairs = connections
-        .filter((c) => c.providerId === providerId)
-        .map((connection) => ({ connection, provider, model, memberOrder: Number.POSITIVE_INFINITY }));
-
-      if (pairs.length === 0) {
-        return {
-          pairs: [],
-          hardError: `No connection is configured for ${provider.name}.`,
-          combo: null,
-          unrecognized: false,
-        };
-      }
-      return { pairs, hardError: null, combo: null, unrecognized: false };
-    }
+  // A model string can be a provider pin ("groq/llama-3.3-70b-versatile"), a
+  // catalog id that itself contains a slash (Groq's "openai/gpt-oss-120b",
+  // OpenRouter's "deepseek/deepseek-r1:free"), or both at once (OpenRouter's
+  // "openai/gpt-4o-mini" is also a pin for OpenAI's own gpt-4o-mini). Both
+  // readings are collected. Treating every prefix as a pin made seven catalog
+  // ids that /v1/models advertises answer 404.
+  const pinned = pinPairings(input.requestedModel, connections);
+  const exact = exactPairings(input.requestedModel, connections);
+  const pairs = [...pinned.pairs, ...exact];
+  if (pairs.length > 0) return { pairs, hardError: null, combo: null, unrecognized: false };
+  if (pinned.hardError !== null) {
+    return { pairs: [], hardError: pinned.hardError, combo: null, unrecognized: false };
   }
-
-  // A bare model id: every connection that offers it. This is what makes the
-  // same `model` string survive a provider outage.
-  const bare = input.requestedModel;
-  const exact: Pairing[] = [];
-  for (const connection of connections) {
-    const provider = getProvider(connection.providerId);
-    if (provider === null) continue;
-    const model = findModel(provider.id, bare);
-    if (model === null) continue;
-    exact.push({ connection, provider, model, memberOrder: Number.POSITIVE_INFINITY });
-  }
-  if (exact.length > 0) return { pairs: exact, hardError: null, combo: null, unrecognized: false };
 
   // Nothing matched by name, so this is an "auto"-style request: the default
   // policy governs it if there is one, otherwise the whole fleet for this
@@ -192,6 +159,52 @@ function collectPairings(input: ExpandInput): PairingSet {
     return { ...comboPairings(input, fallback, connections), combo: fallback, unrecognized };
   }
   return { pairs: fleetPairings(input, connections), hardError: null, combo: null, unrecognized };
+}
+
+/**
+ * "provider/model" pins the provider but still spreads across every connection
+ * the user holds for it, so a second key still provides failover. The error is
+ * only used when nothing else matched the full string either.
+ */
+function pinPairings(
+  requestedModel: string,
+  connections: Connection[],
+): { pairs: Pairing[]; hardError: string | null } {
+  const slash = requestedModel.indexOf('/');
+  if (slash <= 0) return { pairs: [], hardError: null };
+
+  const providerId = requestedModel.slice(0, slash);
+  const modelId = requestedModel.slice(slash + 1);
+  const provider = getProvider(providerId);
+  if (provider === null) return { pairs: [], hardError: null };
+
+  const model = findModel(providerId, modelId);
+  if (model === null) {
+    return { pairs: [], hardError: `Model "${modelId}" is not available on ${provider.name}.` };
+  }
+  const pairs = connections
+    .filter((c) => c.providerId === providerId)
+    .map((connection) => ({ connection, provider, model, memberOrder: Number.POSITIVE_INFINITY }));
+  return {
+    pairs,
+    hardError: pairs.length === 0 ? `No connection is configured for ${provider.name}.` : null,
+  };
+}
+
+/**
+ * Every connection that offers this exact model id. This is what makes the
+ * same `model` string survive a provider outage.
+ */
+function exactPairings(requestedModel: string, connections: Connection[]): Pairing[] {
+  const exact: Pairing[] = [];
+  for (const connection of connections) {
+    const provider = getProvider(connection.providerId);
+    if (provider === null) continue;
+    const model = findModel(provider.id, requestedModel);
+    if (model === null) continue;
+    exact.push({ connection, provider, model, memberOrder: Number.POSITIVE_INFINITY });
+  }
+  return exact;
 }
 
 /**
@@ -269,9 +282,6 @@ function evaluate(
   if (model.modality !== input.modality) return exclude(`Model does not serve ${input.modality}`);
   if (provider.requiresKey && !hasCredential(connection.id)) return exclude('No API key configured');
 
-  if (!wouldAllow(connection.id)) return exclude(BREAKER_OPEN);
-  if (isLockedOut(connection.id, model.id)) return exclude(MODEL_LOCKED_OUT);
-
   for (const feature of requires) {
     if (!model.features.includes(feature)) return exclude(`Model lacks required feature: ${feature}`);
   }
@@ -303,6 +313,13 @@ function evaluate(
       );
     }
   }
+
+  // The two conditions that lift on their own come last, so a candidate carries
+  // one of these reasons only if it passed every permanent check. That is what
+  // lets the executor answer 503 "retry shortly" without lying about a request
+  // that no candidate could ever serve.
+  if (!wouldAllow(connection.id)) return exclude(BREAKER_OPEN);
+  if (isLockedOut(connection.id, model.id)) return exclude(MODEL_LOCKED_OUT);
 
   return base;
 }
