@@ -74,6 +74,20 @@ describe('access control', () => {
       expect(isLocalRequest(req('/api/keys', { 'x-forwarded-for': '203.0.113.9' }))).toBe(false);
     });
 
+    it('fails closed in production, where only server.mjs is supported', () => {
+      // A hand-written unit running bare `next start` listens on every
+      // interface, and the header fallback would let anyone claim to be local.
+      const env = process.env as Record<string, string | undefined>;
+      const saved = env.NODE_ENV;
+      env.NODE_ENV = 'production';
+      try {
+        expect(isLocalRequest(req('/api/keys'))).toBe(false);
+        expect(isLocalRequest(req('/api/keys', { 'x-forwarded-for': '127.0.0.1' }))).toBe(false);
+      } finally {
+        env.NODE_ENV = saved;
+      }
+    });
+
     it('no longer counts the unspecified address :: as loopback', () => {
       expect(isLocalRequest(req('/api/keys', { 'x-forwarded-for': '::' }))).toBe(false);
     });
@@ -233,6 +247,9 @@ describe('access control', () => {
       const cookie = res.headers.get('set-cookie') ?? '';
       expect(cookie).toContain(`${TOKEN_COOKIE}=${token}`);
       expect(cookie.toLowerCase()).toContain('httponly');
+      // Lax so a link from email or chat still carries it; writes from other
+      // sites are refused by the Origin check instead.
+      expect(cookie.toLowerCase()).toContain('samesite=lax');
     });
 
     it('does not swap a wrong token', () => {

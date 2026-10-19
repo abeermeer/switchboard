@@ -27,7 +27,7 @@
     "public",
     "server.mjs",
     "src",
-    "next.config.ts",
+    "next.config.mjs",
     "postcss.config.mjs",
     "README.md",
     "LICENSE"

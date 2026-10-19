@@ -33,14 +33,22 @@ export function appDataDir() {
  * the README's promise that data lives in the OS app-data folder was false:
  * deleting the clone, or a `git clean -xdf`, destroyed the master key and every
  * stored credential with it. New installs now always use the app-data folder.
- * A database already sitting inside the package is still used, so an upgrade
- * never looks like data loss, and `isInsidePackage` lets the CLI warn about it.
+ * A database inside the package is still used when the app-data folder has
+ * none, so an upgrade never looks like data loss, and `isInsidePackage` lets
+ * the CLI warn about it. Moving it then cannot overwrite anything.
  */
 export function resolveDataDir(root) {
   if (process.env.SWITCHBOARD_DATA_DIR) return process.env.SWITCHBOARD_DATA_DIR;
+  // The app-data folder wins whenever it already holds a database. `npm start`
+  // and `npm run dev` keep their own ./data in the clone, and preferring any
+  // database found there flipped `switchboard` onto that empty one: every key
+  // looked lost, and following the "move it" advice would have overwritten the
+  // real database and master key.
+  const shared = appDataDir();
+  if (existsSync(join(shared, 'switchboard.db'))) return shared;
   const legacy = join(root, 'data');
   if (existsSync(join(legacy, 'switchboard.db'))) return legacy;
-  return appDataDir();
+  return shared;
 }
 
 /** True when `dir` sits inside the installed package or clone. */

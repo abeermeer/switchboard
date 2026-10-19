@@ -39,7 +39,10 @@ export function proxy(req: NextRequest): Response {
     const response = NextResponse.redirect(clean);
     response.cookies.set(TOKEN_COOKIE, token.trim(), {
       httpOnly: true,
-      sameSite: 'strict',
+      // Lax, not strict: with strict, following a link to the dashboard from
+      // email or chat landed on the deny page. Cross-site writes are refused by
+      // the Origin check regardless of the cookie.
+      sameSite: 'lax',
       secure: req.nextUrl.protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https',
       path: '/',
       maxAge: 60 * 60 * 24 * 30,

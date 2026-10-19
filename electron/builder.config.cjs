@@ -25,7 +25,7 @@ module.exports = {
     '.next/**/*',
     'public/**/*',
     'package.json',
-    'next.config.ts',
+    'next.config.mjs',
     'server.mjs',
     // Next's production server and the app's runtime dependencies must ship;
     // dev tooling must not.
@@ -36,8 +36,8 @@ module.exports = {
     '!node_modules/typescript/**',
     '!node_modules/@types/**',
     '!**/*.map',
-    // Scoped to node_modules: a blanket `!**/*.ts` also dropped next.config.ts,
-    // which the server loads at startup.
+    // Scoped to node_modules: a blanket `!**/*.ts` once silently dropped the
+    // app's own config file.
     '!node_modules/**/*.ts',
     '!node_modules/**/*.tsx',
   ],
@@ -65,7 +65,9 @@ module.exports = {
     target: ['AppImage', 'deb'],
     icon: 'electron/assets/icon.png',
     category: 'Development',
-    // Pinned so the CI launch check knows what to run in linux-unpacked/.
-    executableName: 'switchboard',
+    // Pinned so the CI launch check knows what to run in linux-unpacked/. Not
+    // plain `switchboard`: the .deb installs it to /usr/bin, where it would
+    // shadow the CLI command of the same name.
+    executableName: 'switchboard-desktop',
   },
 };

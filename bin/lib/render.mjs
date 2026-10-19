@@ -39,8 +39,8 @@ export function table(columns, rows) {
   }
 }
 
-export function banner(port, dataDir, host = '127.0.0.1') {
-  const url = `http://127.0.0.1:${port}`;
+export function banner(port, dataDir, host = '127.0.0.1', reachAt = '127.0.0.1') {
+  const url = `http://${reachAt.includes(':') ? `[${reachAt}]` : reachAt}:${port}`;
   console.log('');
   console.log(`  ${pc.bold(pc.yellow('Switchboard'))} ${pc.dim('· local-first AI gateway')}`);
   console.log('');

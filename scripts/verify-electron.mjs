@@ -217,11 +217,11 @@ if (config !== undefined) {
   if (config.asar !== false) {
     fail('asar must be off: the gateway child needs a real directory as its working directory');
   }
-  for (const needed of ['server.mjs', 'next.config.ts', '.next/**/*']) {
+  for (const needed of ['server.mjs', 'next.config.mjs', '.next/**/*']) {
     if (!files.includes(needed)) fail(`builder files do not include ${needed}`);
   }
   // A blanket exclusion wins over the explicit include and silently drops it.
-  if (files.includes('!**/*.ts')) fail('builder files exclude every .ts file, including next.config.ts');
+  if (files.includes('!**/*.mjs')) fail('builder files exclude every .mjs file, including server.mjs and next.config.mjs');
   if (problems.length === 0) ok('runtime files ship outside an asar archive');
 }
 

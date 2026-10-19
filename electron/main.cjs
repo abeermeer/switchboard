@@ -134,10 +134,17 @@ function dataDir() {
   return shared;
 }
 
+/** Resolves once the gateway process has exited (or after a 10 s backstop). */
 function stopServer() {
-  if (server === null) return;
+  if (server === null) return Promise.resolve();
   const child = server;
   server = null;
+
+  const exited = new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    child.once('exit', () => resolve());
+    setTimeout(resolve, 10_000);
+  });
 
   if (process.platform === 'win32' && child.pid !== undefined) {
     // Next spawns workers; killing only the parent leaves them holding the port.
@@ -145,6 +152,18 @@ function stopServer() {
   } else {
     child.kill('SIGTERM');
   }
+  return exited;
+}
+
+/**
+ * Restart in place. The old process has to be gone before the new one picks a
+ * port, or the new one lands on the next free port while the window reloads the
+ * old, now dead, address.
+ */
+async function restartServer() {
+  await stopServer();
+  await startServer();
+  void win?.loadURL(`http://127.0.0.1:${port}/dashboard`);
 }
 
 function createWindow() {
@@ -237,11 +256,7 @@ function createTray() {
         },
         {
           label: 'Restart gateway',
-          click: async () => {
-            stopServer();
-            await startServer();
-            win?.reload();
-          },
+          click: () => void restartServer(),
         },
         { type: 'separator' },
         {
@@ -299,9 +314,7 @@ function createMenu() {
 ipcMain.handle('sb:endpoint', () => `http://127.0.0.1:${port}/v1`);
 ipcMain.handle('sb:open-external', (_event, url) => shell.openExternal(String(url)));
 ipcMain.handle('sb:restart', async () => {
-  stopServer();
-  await startServer();
-  win?.reload();
+  await restartServer();
   return true;
 });
 

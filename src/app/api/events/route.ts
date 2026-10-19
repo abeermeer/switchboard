@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const TICK_MS = 2_000;
+const REVALIDATE_EVERY = 15;
 
 /**
  * One SSE stream feeding the whole dashboard.
@@ -35,8 +36,17 @@ export function GET(req: Request): Response {
         }
       };
 
+      let ticks = 0;
       const tick = (): void => {
         if (closed) return;
+        // A rotated token signs browsers out of every request but this one,
+        // which would otherwise keep streaming prompts for as long as it stays
+        // open. Re-check the caller every 30 seconds.
+        ticks += 1;
+        if (ticks % REVALIDATE_EVERY === 0 && adminGate(req) !== null) {
+          close();
+          return;
+        }
         try {
           send('health', snapshotAll());
 

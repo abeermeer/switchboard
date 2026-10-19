@@ -51,7 +51,7 @@ jobs:
             label: Linux AppImage
             flag: --linux AppImage
             pattern: 'release/*.AppImage'
-            app: 'xvfb-run -a release/linux-unpacked/switchboard --no-sandbox'
+            app: 'xvfb-run -a release/linux-unpacked/switchboard-desktop --no-sandbox'
 
     steps:
       - uses: actions/checkout@v4

@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { getDb, parseJson } from '@/lib/db/client';
 import { asRow, str } from '@/lib/db/rows';
+import { logger } from '@/lib/logger';
 
 /**
  * Dashboard auth.
@@ -103,8 +104,28 @@ export function clientAddress(req: Request): string | null {
  */
 export function isLocalRequest(req: Request): boolean {
   if (behindSwitchboardServer()) return req.headers.get(CLIENT_HEADER) === 'local';
+  // A production server that is not server.mjs (a hand-written unit running
+  // bare `next start`, which listens on every interface) has no trustworthy
+  // signal, and the header fallback below lets anyone claim to be local. So it
+  // fails closed: every caller counts as remote and needs the token.
+  if (process.env.NODE_ENV === 'production') {
+    warnUnsupportedLauncher();
+    return false;
+  }
   const address = clientAddress(req);
   return address === null || isLoopback(address);
+}
+
+let warnedLauncher = false;
+
+function warnUnsupportedLauncher(): void {
+  if (warnedLauncher) return;
+  warnedLauncher = true;
+  logger.error(
+    'Switchboard is running without server.mjs, so it cannot tell local callers from remote ' +
+      'ones and treats everyone as remote. Start it with `npm start`, `sb start` or ' +
+      '`node server.mjs` instead of `next start`.',
+  );
 }
 
 function isLoopback(address: string): boolean {

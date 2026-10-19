@@ -57,7 +57,7 @@ program
     if (!existsSync(join(root, '.next'))) {
       fail('No production build found.');
       info('From a repo checkout, run:  npm run build');
-      info('If you installed globally, reinstall:  npm install -g switchboard-gateway');
+      info('Then run `npm install -g .` again from that folder.');
       process.exit(1);
     }
 
@@ -65,7 +65,10 @@ program
     // the next `npm update -g` would delete it along with every stored key.
     const dataDir = resolveDataDir(root);
 
-    banner(port, dataDir, host);
+    // Where this machine reaches the server: loopback when it listens on every
+    // interface, otherwise the one address it was told to bind.
+    const reachAt = connectHost(host);
+    banner(port, dataDir, host, reachAt);
 
     if (isInsidePackage(root, dataDir)) {
       warn(`Your database and master key are inside ${root}.`);
@@ -83,12 +86,25 @@ program
       stdio: 'inherit',
     });
 
-    if (options.open === true) {
-      await waitForPort(port);
-      openBrowser(`http://127.0.0.1:${port}/dashboard`);
-    }
+    let exited = false;
+    child.on('exit', (code) => {
+      exited = true;
+      process.exit(code ?? 0);
+    });
+    // Ctrl+C reaches the server too, and it shuts down by draining requests.
+    // Exiting here first would hand the terminal back while it is still going.
+    process.on('SIGINT', () => {});
+    process.on('SIGTERM', () => child.kill('SIGTERM'));
 
-    child.on('exit', (code) => process.exit(code ?? 0));
+    if (options.open === true) {
+      // A server that fails to start (port taken, bad host) exits at once; do
+      // not sit out the full timeout pretending it might still come up.
+      const ready = await waitForPort(port, reachAt, () => exited).then(
+        () => true,
+        () => false,
+      );
+      if (ready) openBrowser(`http://${urlHost(reachAt)}:${port}/dashboard`);
+    }
   });
 
 // ── token ────────────────────────────────────────────────────────────────────
@@ -304,7 +320,13 @@ program
   .command('chat')
   .description('streaming chat REPL against the gateway')
   .option('-m, --model <model>', 'model or policy slug', 'auto')
+  // Once any API key exists the gateway requires one, and chat sent none, so it
+  // stopped working the moment the quickstart's `sb keys new` had run.
+  .option('-k, --key <key>', 'API key (sb-live-...), or set SWITCHBOARD_API_KEY')
   .action(async (options) => {
+    // Read here, not as the option default: commander prints defaults in
+    // --help, which would put the secret on screen.
+    const apiKey = options.key ?? process.env.SWITCHBOARD_API_KEY;
     console.log('');
     console.log(`  ${pc.bold('Switchboard chat')} ${pc.dim(`· model ${options.model} · Ctrl+C to exit`)}`);
     console.log('');
@@ -319,13 +341,19 @@ program
 
         const response = await fetch(`${baseUrl()}/v1/chat/completions`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+          },
           body: JSON.stringify({ model: options.model, messages: history, stream: true }),
         });
 
         if (!response.ok || response.body === null) {
           const body = await response.text();
           console.log(pc.red(`  ${body}`));
+          if (response.status === 401) {
+            info('Pass a key with  sb chat --key sb-live-...  or set SWITCHBOARD_API_KEY.');
+          }
           console.log('');
           return ask();
         }
@@ -523,11 +551,21 @@ function openBrowser(url) {
   spawn(command, args, { detached: true, stdio: 'ignore' }).unref();
 }
 
-function waitForPort(port, timeoutMs = 60_000) {
+function connectHost(host) {
+  const value = String(host).trim();
+  return value === '' || value === '0.0.0.0' || value === '::' ? '127.0.0.1' : value;
+}
+
+function urlHost(host) {
+  return host.includes(':') ? `[${host}]` : host;
+}
+
+function waitForPort(port, host = '127.0.0.1', gaveUp = () => false, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const attempt = () => {
-      const socket = net.connect(port, '127.0.0.1');
+      if (gaveUp()) return reject(new Error('server exited'));
+      const socket = net.connect(port, host);
       socket.once('connect', () => {
         socket.destroy();
         resolve();
