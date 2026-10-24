@@ -167,6 +167,13 @@ jobs:
           want to pin to it.
           EOF
           )
+          # Lead with this version's CHANGELOG section, so a security fix is the
+          # first thing someone deciding whether to upgrade reads.
+          CHANGES=$(awk -v h="## ${{ steps.v.outputs.version }}" \
+            '$0 == h { on = 1; next } on && /^## / { exit } on' CHANGELOG.md 2>/dev/null || true)
+          if [ -n "$CHANGES" ]; then
+            NOTES="$CHANGES"$'\n\n---\n\n'"$NOTES"
+          fi
           ASSETS=""
           [ -f brag-output/brag.mp4 ] && ASSETS="$ASSETS brag-output/brag.mp4"
           [ -f brag-output/brag.jpg ] && ASSETS="$ASSETS brag-output/brag.jpg"
