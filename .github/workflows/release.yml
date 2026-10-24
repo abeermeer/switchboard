@@ -116,11 +116,28 @@ jobs:
           fi
           echo "tarball clean"
 
+      # A step's own env is not visible to its `if`, and `secrets` cannot be read
+      # there at all, so the presence check has to happen a step earlier. Testing
+      # env.NPM_TOKEN on the publish step itself always saw an empty string and
+      # skipped the publish even with the secret set.
+      - name: Check for an npm token
+        id: npm
+        if: steps.exists.outputs.already == 'false'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No NPM_TOKEN secret; skipping the npm publish"
+          fi
+
       # Skips itself until an NPM_TOKEN secret exists, so the release still cuts
       # its branch, tag and GitHub release without one. Nothing here can publish
       # by accident: no token, no publish.
       - name: Publish to npm
-        if: steps.exists.outputs.already == 'false' && env.NPM_TOKEN != ''
+        if: steps.exists.outputs.already == 'false' && steps.npm.outputs.present == 'true'
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
