@@ -273,7 +273,7 @@ function headerSafe(value: string): string {
  * Routing telemetry on every response. These headers are how a user debugs a
  * slow or surprising request from curl alone, without opening the dashboard.
  */
-function traceHeaders(
+export function traceHeaders(
   decision: RoutingDecision,
   costUsd: number,
   model: { id: string } | null,

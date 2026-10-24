@@ -1,6 +1,12 @@
+import type { TokenUsage } from '@/types/core';
 import { route } from '@/lib/router';
+import { recordRequest, traceHeaders } from '@/lib/api/handler';
+import { getSettings } from '@/lib/db/repos/settings';
+import { findModel } from '@/lib/providers/registry';
+import { settleRequest } from '@/lib/usage/cost';
 import {
   authenticate,
+  clientMeta,
   corsHeaders,
   jsonError,
   policyDenied,
@@ -18,6 +24,8 @@ export const dynamic = 'force-dynamic';
  * the gateway does not know about.
  */
 export async function POST(req: Request): Promise<Response> {
+  const startedAt = Date.now();
+  const { ip, userAgent } = clientMeta(req);
   const auth = authenticate(req);
   if (auth.error !== null) return auth.error;
 
@@ -39,10 +47,12 @@ export async function POST(req: Request): Promise<Response> {
   const notAllowed = policyDenied(auth.key, requestedModel, req);
   if (notAllowed !== null) return notAllowed;
 
-  const body: Record<string, unknown> = { __formData: form };
+  // The text fields alone are what a log row keeps; the audio stays out of it.
+  const fields: Record<string, string> = {};
   for (const [key, value] of form.entries()) {
-    if (typeof value === 'string') body[key] = value;
+    if (typeof value === 'string') fields[key] = value;
   }
+  const body: Record<string, unknown> = { __formData: form, ...fields };
 
   const result = await route({
     modality: 'audio.transcription',
@@ -53,17 +63,65 @@ export async function POST(req: Request): Promise<Response> {
     signal: req.signal,
   });
 
+  const logPayloads = getSettings().logPayloads;
+  // This route bypasses the shared JSON pipeline, and used to bypass its log
+  // too: a paid transcription reached no chart, total or key budget.
+  const record = (
+    status: 'success' | 'error',
+    httpStatus: number,
+    usage: TokenUsage | null,
+    error: string | null,
+    response: unknown,
+  ): void => {
+    recordRequest(
+      {
+        modality: 'audio.transcription',
+        requestedModel,
+        decision: result.decision,
+        status,
+        httpStatus,
+        durationMs: Date.now() - startedAt,
+        ttftMs: result.response?.ttftMs ?? null,
+        streamed: false,
+        usage,
+        apiKeyId: auth.key?.id ?? null,
+        ip,
+        userAgent,
+        error,
+      },
+      logPayloads ? { request: fields, response } : {},
+    );
+  };
+
   if (result.response === null || !result.response.ok) {
     const err = result.error;
+    const status = err === null ? 502 : statusForErrorKind(err.kind);
+    const message = err?.message ?? 'No provider could transcribe this audio.';
+    record('error', status, null, message, { error: message });
     return jsonError(
-      err === null ? 502 : statusForErrorKind(err.kind),
-      err?.message ?? 'No provider could transcribe this audio.',
+      status,
+      message,
       'api_error',
       err?.kind ?? null,
+      traceHeaders(result.decision, 0, null, result.unrecognizedModel),
+      req,
     );
   }
 
-  return Response.json(result.response.json ?? {}, { headers: corsHeaders(req) });
+  const response = result.response;
+  const winner = result.decision.winningAttempt;
+  const attempt = winner === null ? null : (result.decision.attempts[winner] ?? null);
+  const servedModel = attempt === null ? null : findModel(attempt.providerId, attempt.modelId);
+  const settled = settleRequest(attempt?.providerId ?? null, attempt?.modelId ?? null, response.usage);
+
+  record('success', response.httpStatus, response.usage, null, response.json);
+
+  return Response.json(response.json ?? {}, {
+    headers: {
+      ...corsHeaders(req),
+      ...traceHeaders(result.decision, settled.costUsd, servedModel, result.unrecognizedModel),
+    },
+  });
 }
 
 export function OPTIONS(req: Request): Response {

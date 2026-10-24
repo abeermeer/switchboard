@@ -145,6 +145,21 @@ export function normalizeUsage(raw: unknown): TokenUsage | null {
   };
 }
 
+/**
+ * Usage for a transcription response. Duration-billed models (whisper-1)
+ * report `usage: { type: 'duration', seconds }` with no token counts, and a
+ * verbose_json response carries the clip length as a top-level `duration`.
+ * Token-billed transcription models report ordinary token usage.
+ */
+export function transcriptionUsage(body: Record<string, unknown>): TokenUsage | null {
+  const usage = isRecord(body.usage) ? body.usage : null;
+  const seconds =
+    (usage !== null && usage.type === 'duration' ? finiteNumber(usage.seconds) : null) ??
+    finiteNumber(body.duration);
+  if (seconds !== null) return { ...zeroUsage(), audioSeconds: seconds };
+  return normalizeUsage(usage);
+}
+
 /** Anthropic reports input once at message_start and output at message_delta. */
 export function mergeUsage(a: TokenUsage | null, b: TokenUsage | null): TokenUsage | null {
   if (!a) return b;

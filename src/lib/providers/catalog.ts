@@ -79,9 +79,14 @@ function image(
 /**
  * Transcription is billed per audio minute. Left at a bare $0 per token,
  * OpenAI's paid Whisper ranked as free and the free-only policy, which
- * promises never to spend money, routed to it.
+ * promises never to spend money, routed to it, and every call was logged at $0.
  */
-function transcription(id: string, name: string): CatalogModel {
+function transcription(
+  id: string,
+  name: string,
+  usdPerMinute: number,
+  minimumSeconds = 0,
+): CatalogModel {
   return {
     id,
     name,
@@ -93,6 +98,7 @@ function transcription(id: string, name: string): CatalogModel {
     outputCostPerMTok: 0,
     throughputPrior: 0,
     unpriced: true,
+    perMinute: { usd: usdPerMinute, minimumSeconds },
   };
 }
 
@@ -137,7 +143,9 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       chat('qwen/qwen3-32b', 'Qwen3 32B', 131_072, 40_960, 0.29, 0.59, 400, TOOLS_REASONING),
       chat('meta-llama/llama-4-scout-17b-16e-instruct', 'Llama 4 Scout 17B', 131_072, 8_192, 0.11, 0.34, 600, TOOLS_VISION),
       chat('meta-llama/llama-4-maverick-17b-128e-instruct', 'Llama 4 Maverick 17B', 131_072, 8_192, 0.2, 0.6, 550, TOOLS_VISION),
-      transcription('whisper-large-v3-turbo', 'Whisper Large v3 Turbo'),
+      // console.groq.com/docs/speech-to-text: $0.04 per hour, and "Minimum
+      // Billed Length: 10 seconds".
+      transcription('whisper-large-v3-turbo', 'Whisper Large v3 Turbo', 0.04 / 60, 10),
     ],
   },
   {
@@ -481,7 +489,8 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       embedding('text-embedding-3-small', 'Text Embedding 3 Small', 8_191, 0.02),
       embedding('text-embedding-3-large', 'Text Embedding 3 Large', 8_191, 0.13),
       image('gpt-image-1', 'GPT Image 1', 5.0, 40.0),
-      transcription('whisper-1', 'Whisper v2'),
+      // developers.openai.com/api/docs/models/whisper-1: $0.006 per minute.
+      transcription('whisper-1', 'Whisper v2', 0.006),
       {
         // OpenAI's moderation endpoint is free of charge. Without a catalog entry
         // /v1/moderations was advertised but answered 404 with every provider

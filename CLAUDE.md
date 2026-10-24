@@ -141,7 +141,9 @@ Do not "fix" these:
   `free-only` spend money while logging $0.
 - **Transcription models are `unpriced`.** Whisper is billed per audio minute, so its $0
   token prices are a missing price. It counts as free only inside a provider's free tier
-  (Groq), and every cost ceiling refuses it elsewhere (OpenAI). The token-window check
+  (Groq), and every cost ceiling refuses it elsewhere (OpenAI). What it cost is settled
+  from the catalog's `perMinute` price and the duration the provider reports, not from
+  token counts. The token-window check
   skips audio too: the optional text prompt used to fill a 448-token window and refuse the
   request.
 - **The npm package is `switchboard-gateway`, not `switchboard`.** The short name belongs to
@@ -288,7 +290,6 @@ Be honest about these rather than papering over them:
 - **The Claude 5.5 models are not in the catalog.** They reject the sampling parameters
   and forced `tool_choice` the Anthropic adapter passes through; they need adapter support
   first. Claude Sonnet 4.5 retires 2026-11-30 and must be removed from the catalog then.
-- **Paid transcription logs $0.** Spend and budgets cannot see per-minute billing.
 - **A same-machine proxy with no forwarding header looks local.** See the deliberate list
   above; documented, not fixable in code.
 

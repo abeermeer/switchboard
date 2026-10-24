@@ -45,7 +45,18 @@ export function computeCost(model: CatalogModel | null, usage: TokenUsage | null
     PER_MTOK;
   const outputCost = (billedOutput * model.outputCostPerMTok) / PER_MTOK;
 
-  return inputCost + outputCost;
+  return inputCost + outputCost + audioCost(model, usage);
+}
+
+/**
+ * Transcription carries no token counts, so its whole bill is here. The
+ * minimum applies only to a duration the provider reported: an unreported one
+ * is unknown, not short, and charging it the minimum would invent a figure.
+ */
+function audioCost(model: CatalogModel, usage: TokenUsage): number {
+  if (model.perMinute === undefined || usage.audioSeconds === undefined) return 0;
+  const billedSeconds = Math.max(usage.audioSeconds, model.perMinute.minimumSeconds);
+  return (billedSeconds / 60) * model.perMinute.usd;
 }
 
 /**

@@ -98,11 +98,13 @@ Two exceptions keep the threshold from spending money:
 - **OpenRouter** covers only its `:free` variants. Its paid models are priced low enough
   to pass the threshold, so the catalog marks its free tier `zeroPricedOnly` and nothing
   else there counts as free.
-- **Transcription** is billed per audio minute, which a per-token catalog cannot express.
-  Whisper is marked `unpriced`: it is free inside a provider's free tier (Groq), paid at an
-  unknown rate everywhere else (OpenAI), and refused by any cost ceiling, including
-  `free-only`'s $0 one. Logged spend for paid transcription is $0, because there is no
-  token count to price; budgets do not see it.
+- **Transcription** is billed per audio minute, which a per-token ceiling cannot express.
+  Whisper is marked `unpriced` for routing: it is free inside a provider's free tier (Groq),
+  ranks as standard everywhere else (OpenAI), and is refused by any cost ceiling, including
+  `free-only`'s $0 one. Its spend is settled from the per-minute price in the catalog and
+  the audio duration the provider reports (`usage.seconds`, or `duration` in verbose_json),
+  with the provider's minimum billed length applied, so it counts toward spend and key
+  budgets. A response that reports no duration is logged at $0.
 
 ## The same model, several providers
 
