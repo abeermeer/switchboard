@@ -11,6 +11,7 @@ import { createApiKey } from '@/lib/db/repos/apiKeys';
 import { deleteCombo, ensureSeedCombos, listCombos, updateCombo } from '@/lib/db/repos/combos';
 import { listRequestLogs, getRequestLog } from '@/lib/db/repos/log';
 import { clearRateLimit } from '@/lib/auth/rateLimit';
+import { monthToDateCostForApiKey } from '@/lib/db/repos/usage';
 import { reloadMasterKey } from '@/lib/crypto/vault';
 import { dropDb, freshDb } from '../helpers/db';
 import { chatOk, jsonRequest, providerError, stubUpstream, type Upstream } from '../helpers/upstream';
@@ -385,11 +386,11 @@ describe('gateway integration', () => {
   // ── transcriptions ────────────────────────────────────────────────────────
 
   describe('POST /v1/audio/transcriptions', () => {
-    function audioForm(fields: Record<string, string> = {}): Request {
+    function audioForm(fields: Record<string, string> = {}, headers: Record<string, string> = {}): Request {
       const form = new FormData();
       form.append('file', new Blob([new Uint8Array([0, 1, 2, 3])], { type: 'audio/wav' }), 'clip.wav');
       for (const [key, value] of Object.entries(fields)) form.append(key, value);
-      return new Request(`${BASE_URL}/v1/audio/transcriptions`, { method: 'POST', body: form });
+      return new Request(`${BASE_URL}/v1/audio/transcriptions`, { method: 'POST', body: form, headers });
     }
 
     beforeEach(() => {
@@ -419,6 +420,56 @@ describe('gateway integration', () => {
 
       expect(res.status).toBe(200);
       expect(upstream.calls).toHaveLength(1);
+    });
+
+    it('logs a paid whisper-1 transcription at its per-minute price', async () => {
+      // OpenAI bills whisper-1 by audio duration and has no free tier. The route
+      // used to write no log row at all, so the spend reached no chart, total
+      // or budget; a 90 second clip is $0.009 at $0.006/min.
+      const openai = createConnection({ providerId: 'openai' });
+      setCredential(openai.id, 'sk-test-audio');
+      const { key, secret } = createApiKey({ name: 'transcriber' });
+      upstream = stubUpstream([
+        { status: 200, json: { text: 'hello', usage: { type: 'duration', seconds: 90 } } },
+      ]);
+
+      const res = await transcriptionsPost(
+        audioForm({ model: 'whisper-1' }, { authorization: `Bearer ${secret}` }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ text: 'hello', usage: { type: 'duration', seconds: 90 } });
+      expect(res.headers.get('x-switchboard-cost-usd')).toBe('0.009000');
+
+      const { rows, total } = listRequestLogs({ limit: 10 });
+      expect(total).toBe(1);
+      expect(rows[0]?.modality).toBe('audio.transcription');
+      expect(rows[0]?.resolvedProviderId).toBe('openai');
+      expect(rows[0]?.costUsd).toBeCloseTo(0.009, 10);
+      expect(monthToDateCostForApiKey(key.id)).toBeCloseTo(0.009, 10);
+    });
+
+    it('logs a free-tier transcription at $0', async () => {
+      upstream = stubUpstream([
+        { status: 200, json: { text: 'hello', usage: { type: 'duration', seconds: 90 } } },
+      ]);
+
+      await transcriptionsPost(audioForm({ model: 'whisper-large-v3-turbo' }));
+
+      const { rows } = listRequestLogs({ limit: 10 });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.costUsd).toBe(0);
+    });
+
+    it('logs a transcription no provider could serve', async () => {
+      upstream = stubUpstream([providerError(500, 'down')]);
+
+      const res = await transcriptionsPost(audioForm({ model: 'whisper-large-v3-turbo' }));
+
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      const { rows } = listRequestLogs({ limit: 10 });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe('error');
     });
   });
 

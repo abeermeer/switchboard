@@ -281,6 +281,36 @@ describe('usage/cost', () => {
       });
     });
 
+    describe('transcription, billed per audio minute', () => {
+      // Whisper's per-token prices are zero because it is not billed per token.
+      // Settling it off token counts logged every paid OpenAI transcription at $0.
+      const ninetySeconds = tokens({ audioSeconds: 90 });
+
+      it('bills OpenAI whisper-1 by the minute of audio', () => {
+        // $0.006/min × 1.5 min.
+        expect(settleRequest('openai', 'whisper-1', ninetySeconds).costUsd).toBeCloseTo(0.009, 10);
+      });
+
+      it('prorates a partial minute instead of rounding it up', () => {
+        expect(settleRequest('openai', 'whisper-1', tokens({ audioSeconds: 10 })).costUsd).toBeCloseTo(0.001, 10);
+      });
+
+      it('bills Groq at its list rate, with its 10 second minimum', () => {
+        // $0.04/hour. A 3 second clip is billed as 10 seconds.
+        const model = findModel('groq', 'whisper-large-v3-turbo');
+        expect(computeCost(model, ninetySeconds)).toBeCloseTo((90 / 3600) * 0.04, 12);
+        expect(computeCost(model, tokens({ audioSeconds: 3 }))).toBeCloseTo((10 / 3600) * 0.04, 12);
+      });
+
+      it('settles Groq transcription at $0 inside its free tier', () => {
+        expect(settleRequest('groq', 'whisper-large-v3-turbo', ninetySeconds).costUsd).toBe(0);
+      });
+
+      it('applies no minimum when the upstream reported no duration', () => {
+        expect(computeCost(findModel('groq', 'whisper-large-v3-turbo'), tokens({}))).toBe(0);
+      });
+    });
+
     describe('free-tier coverage', () => {
       it('settles a free-tier model at $0 even though the catalog prices it', () => {
         // Groq lists llama-3.1-8b-instant at $0.05/$0.08 but serves 14,400
