@@ -74,7 +74,6 @@ is the argument for reviewing fixes and not only bugs.
 
 ### Still open
 
-- Paid transcription logs $0; spend and budgets cannot see per-minute billing.
 - Claude Sonnet 4.5 retires 2026-11-30 and must leave the catalog then.
 - The catalog entries listed above remain unverified, and the CLAUDE.md known gaps stand.
 

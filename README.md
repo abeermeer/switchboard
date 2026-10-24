@@ -633,9 +633,8 @@ preferred it.
 - The Claude 5.5 models are not in the catalog yet: they reject sampling parameters and
   forced tool choice that the Anthropic adapter passes through. Claude Sonnet 4.5 retires on
   2026-11-30 and will fail from then until it is removed from the catalog.
-- Paid transcription logs $0. Whisper is billed per audio minute, which the per-token
-  catalog cannot price, so OpenAI transcription does not count toward spend or budgets.
-  Cost ceilings, including `free-only`, refuse it rather than guess.
+- Cost ceilings, including `free-only`, refuse paid transcription: they are per-token and
+  Whisper is billed per audio minute. Its logged spend is priced per minute.
 
 **Do not run it exposed to the internet** without a reverse proxy and authentication in
 front. It is built for a machine you control. See [SECURITY.md](SECURITY.md) for the threat

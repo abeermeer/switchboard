@@ -20,6 +20,7 @@ import {
   pickHeaders,
   safeJson,
   timedFetch,
+  transcriptionUsage,
 } from './shared';
 
 const MODALITY_PATHS: Record<Modality, string> = {
@@ -208,7 +209,8 @@ async function execute(req: AdapterRequest): Promise<AdapterResponse> {
     };
   }
 
-  const usage: TokenUsage | null = normalizeUsage(parsed.usage);
+  const usage: TokenUsage | null =
+    req.modality === 'audio.transcription' ? transcriptionUsage(parsed) : normalizeUsage(parsed.usage);
   return {
     ok: true,
     httpStatus: res.status,

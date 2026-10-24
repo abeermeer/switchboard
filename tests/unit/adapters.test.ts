@@ -24,6 +24,7 @@ import {
   pickHeaders,
   safeJson,
   timedFetch,
+  transcriptionUsage,
   translateSse,
   usageToOpenAi,
   zeroUsage,
@@ -185,6 +186,30 @@ describe('safeJson', () => {
 });
 
 // ─── normalizeUsage ──────────────────────────────────────────────────────────
+
+describe('transcriptionUsage', () => {
+  // OpenAI bills whisper-1 by audio duration and reports it as
+  // usage: { type: 'duration', seconds }, with no token counts at all.
+  it('reads the duration usage OpenAI returns for whisper-1', () => {
+    expect(transcriptionUsage({ text: 'hi', usage: { type: 'duration', seconds: 4 } })).toEqual(
+      usage({ audioSeconds: 4 }),
+    );
+  });
+
+  it('falls back to the verbose_json duration when usage is absent', () => {
+    expect(transcriptionUsage({ text: 'hi', duration: 3.32 })).toEqual(usage({ audioSeconds: 3.32 }));
+  });
+
+  it('keeps token usage for token-billed transcription models', () => {
+    expect(
+      transcriptionUsage({ text: 'hi', usage: { type: 'tokens', input_tokens: 14, output_tokens: 45, total_tokens: 59 } }),
+    ).toEqual(usage({ promptTokens: 14, completionTokens: 45, totalTokens: 59 }));
+  });
+
+  it('returns null when the response says nothing about what it billed', () => {
+    expect(transcriptionUsage({ text: 'hi' })).toBeNull();
+  });
+});
 
 describe('normalizeUsage', () => {
   it('reads OpenAI chat-completions accounting', () => {

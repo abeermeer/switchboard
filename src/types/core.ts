@@ -65,12 +65,19 @@ export interface CatalogModel {
   /** Rough tokens/sec, used as a latency prior before real data exists. */
   throughputPrior: number;
   /**
-   * Billed in a unit the catalog cannot express (audio minutes), so the zero
-   * token prices above are a missing price, not a free one. Such a model is
-   * free only inside a provider's free tier, and a cost ceiling refuses it
-   * everywhere else.
+   * Billed in a unit the $/MTok fields cannot express (audio minutes), so the
+   * zero token prices above are a missing price, not a free one. Such a model
+   * is free only inside a provider's free tier, and a cost ceiling refuses it
+   * everywhere else. What it actually cost is settled from `perMinute`.
    */
   unpriced?: boolean;
+  /** Duration billing, for models priced per minute of audio rather than per token. */
+  perMinute?: {
+    /** USD per minute of input audio, prorated to the second. */
+    usd: number;
+    /** Shortest clip the provider bills; a shorter one is charged as this long. */
+    minimumSeconds: number;
+  };
 }
 
 export interface ProviderCatalogEntry {
@@ -293,6 +300,8 @@ export interface TokenUsage {
   cachedTokens: number;
   /** How many of `completionTokens` were reasoning. A breakdown, never billed on top. */
   reasoningTokens: number;
+  /** Seconds of input audio, for transcription billed by duration. */
+  audioSeconds?: number;
 }
 
 export interface UsageRollup {
