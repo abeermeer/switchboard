@@ -207,6 +207,47 @@ describe('router/expandCandidates', () => {
       expect(res.candidates).toEqual([]);
     });
 
+    describe('a retired model id', () => {
+      // Sonnet 4.5 retires 2026-11-30. Clients and saved policies that still
+      // name it must land on the successor, not on a 404 or on "auto".
+      it('resolves a provider pin to the successor', () => {
+        connect('anthropic');
+
+        const res = expandCandidates(ex('anthropic/claude-sonnet-4-5-20250929'));
+
+        expect(res.hardError).toBeNull();
+        expect(res.unrecognizedModel).toBe(false);
+        expect(res.candidates.map((c) => c.modelId)).toEqual(['claude-sonnet-4-6']);
+      });
+
+      it('resolves a bare id, dated or not, on every provider that retired it', () => {
+        connect('anthropic');
+        connect('openrouter');
+
+        expect(expandCandidates(ex('claude-sonnet-4-5')).candidates.map((c) => c.modelId)).toEqual([
+          'claude-sonnet-4-6',
+        ]);
+        expect(
+          expandCandidates(ex('anthropic/claude-sonnet-4.5')).candidates.map((c) => c.modelId),
+        ).toEqual(['anthropic/claude-sonnet-4.6']);
+      });
+
+      it('keeps a policy member that names it instead of dropping it', () => {
+        const anthropic = connect('anthropic');
+        createCombo({
+          slug: 'writer',
+          name: 'Writer',
+          members: [
+            { connectionId: anthropic, modelId: 'claude-sonnet-4-5-20250929', order: 0, weight: 1, enabled: true },
+          ],
+        });
+
+        const res = expandCandidates(ex('writer'));
+
+        expect(res.candidates.map((c) => c.modelId)).toEqual(['claude-sonnet-4-6']);
+      });
+    });
+
     it('does not hardError when the slash prefix is not a known provider id', () => {
       // "vendor/model" for an unknown vendor is not a pin; it falls through to the
       // bare-name and then fleet logic instead of failing the request.

@@ -631,8 +631,8 @@ preferred it.
 - A half-open breaker trial that gets a 429 never reports back, so the trial slot stays
   held until its window expires.
 - The Claude 5.5 models are not in the catalog yet: they reject sampling parameters and
-  forced tool choice that the Anthropic adapter passes through. Claude Sonnet 4.5 retires on
-  2026-11-30 and will fail from then until it is removed from the catalog.
+  forced tool choice that the Anthropic adapter passes through. Claude Sonnet 4.6 is the
+  listed Sonnet; requests that still name the retired Sonnet 4.5 are served by it.
 - Paid transcription logs $0. Whisper is billed per audio minute, which the per-token
   catalog cannot price, so OpenAI transcription does not count toward spend or budgets.
   Cost ceilings, including `free-only`, refuse it rather than guess.

@@ -19,6 +19,27 @@ tag, so a manual one blocks the real release.
 
 ---
 
+## 2026-10-24: Claude Sonnet 4.5 leaves the catalog
+
+Sonnet 4.5 retires 2026-11-30. Its two entries (Anthropic `claude-sonnet-4-5-20250929`,
+OpenRouter `anthropic/claude-sonnet-4.5`) are replaced by Sonnet 4.6, checked on
+platform.claude.com/docs pricing and openrouter.ai the same day: $3/$15, the full 1M
+window at that price, 128K output.
+
+Sonnet 4.6 and not Sonnet 5.5 because 5.5 rejects non-default sampling values and a forced
+`tool_choice`, which the adapter still passes through (see Known gaps). 4.6 accepts both on
+`anthropic-version: 2023-06-01`. It rejects assistant prefill, so it does not carry the
+`prefill` feature and a policy that requires prefill no longer reaches a Sonnet.
+
+Deleting the ids outright would have broken three things quietly: a `anthropic/...` pin
+would answer "not available", a policy member naming the old id would drop out of its
+policy, and a bare id would route as `auto`. Providers now carry `retiredModels`, a map
+from a retired id to its successor that `findModel` follows, so all three keep resolving,
+the decision trace shows the successor as the model that served it, and logged spend on
+the old id stays priced. A catalog test fails if a successor is not a listed model.
+
+---
+
 ## 2026-10-19: An independent review of those fixes
 
 Before calling the branch launchable, a second review ran: four reviewers over security,

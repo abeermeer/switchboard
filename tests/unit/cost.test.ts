@@ -94,9 +94,9 @@ describe('usage/cost', () => {
       });
 
       it('scales linearly below a million tokens', () => {
-        // Claude Sonnet 4.5: $3 in / $15 out. 2,000 in + 1,000 out.
+        // Claude Sonnet 4.6: $3 in / $15 out. 2,000 in + 1,000 out.
         const cost = computeCost(
-          findModel('anthropic', 'claude-sonnet-4-5-20250929'),
+          findModel('anthropic', 'claude-sonnet-4-6'),
           tokens({ promptTokens: 2_000, completionTokens: 1_000 }),
         );
         expect(cost).toBeCloseTo(0.021, 10);
@@ -396,10 +396,17 @@ describe('usage/cost', () => {
       });
 
       it('reports zero saved when the model costs exactly the baseline', () => {
-        // Claude Sonnet 4.5 is priced at $3/$15 — the baseline itself.
-        const settled = settleRequest('anthropic', 'claude-sonnet-4-5-20250929', ONE_MTOK_EACH);
+        // Claude Sonnet 4.6 is priced at $3/$15 — the baseline itself.
+        const settled = settleRequest('anthropic', 'claude-sonnet-4-6', ONE_MTOK_EACH);
         expect(settled.costUsd).toBeCloseTo(BASELINE_FOR_ONE_MTOK_EACH, 10);
         expect(settled.savedUsd).toBe(0);
+      });
+
+      it('still prices a logged attempt on a retired model, at its successor\'s rate', () => {
+        // Rows written before Sonnet 4.5 left the catalog keep its dated id.
+        // Pricing them at $0 would erase real spend from analytics.
+        const settled = settleRequest('anthropic', 'claude-sonnet-4-5-20250929', ONE_MTOK_EACH);
+        expect(settled.costUsd).toBeCloseTo(BASELINE_FOR_ONE_MTOK_EACH, 10);
       });
 
       it('never reports a negative saving for a model above the baseline', () => {
