@@ -30,8 +30,13 @@ export function getProvider(providerId: string): ProviderCatalogEntry | null {
   return BY_ID.get(providerId) ?? null;
 }
 
+/** A retired id resolves to its successor, so callers never see the retirement. */
 export function findModel(providerId: string, modelId: string): CatalogModel | null {
-  return MODELS_BY_PROVIDER.get(providerId)?.get(modelId.trim().toLowerCase()) ?? null;
+  const models = MODELS_BY_PROVIDER.get(providerId);
+  if (models === undefined) return null;
+  const id = modelId.trim().toLowerCase();
+  const successor = BY_ID.get(providerId)?.retiredModels?.[id];
+  return models.get(id) ?? (successor === undefined ? null : (models.get(successor) ?? null));
 }
 
 export function listModelsFor(providerId: string, modality?: Modality): CatalogModel[] {

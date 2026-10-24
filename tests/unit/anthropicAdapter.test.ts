@@ -15,7 +15,7 @@ import {
  * quietly ignored rather than rejected.
  */
 
-const MODEL = 'claude-sonnet-4-5';
+const MODEL = 'claude-sonnet-4-6';
 
 function req(body: Record<string, unknown>, stream = false) {
   return requestFor('anthropic', body, { model: MODEL, stream });
@@ -412,7 +412,7 @@ describe('anthropic adapter', () => {
   describe('streaming', () => {
     const SSE = [
       'event: message_start',
-      'data: {"type":"message_start","message":{"id":"msg_s","model":"claude-sonnet-4-5","usage":{"input_tokens":9,"output_tokens":0}}}',
+      'data: {"type":"message_start","message":{"id":"msg_s","model":"claude-sonnet-4-6","usage":{"input_tokens":9,"output_tokens":0}}}',
       '',
       'event: content_block_delta',
       'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}',

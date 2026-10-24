@@ -218,8 +218,11 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       chat('deepseek/deepseek-chat-v3.1', 'DeepSeek V3.1', 163_840, 16_384, 0.2, 0.8, 60, TOOLS),
       chat('google/gemini-2.5-flash', 'Gemini 2.5 Flash', 1_048_576, 65_536, 0.3, 2.5, 170, FULL),
       chat('openai/gpt-4o-mini', 'GPT-4o mini', 128_000, 16_384, 0.15, 0.6, 110, TOOLS_VISION),
-      chat('anthropic/claude-sonnet-4.5', 'Claude Sonnet 4.5', 200_000, 64_000, 3.0, 15.0, 70, FULL),
+      chat('anthropic/claude-sonnet-4.6', 'Claude Sonnet 4.6', 1_000_000, 128_000, 3.0, 15.0, 70, FULL),
     ],
+    // Sonnet 4.5 retires 2026-11-30. Sonnet 4.6 is the same $3/$15
+    // (openrouter.ai/anthropic/claude-sonnet-4.6, read 2026-10-24).
+    retiredModels: { 'anthropic/claude-sonnet-4.5': 'anthropic/claude-sonnet-4.6' },
   },
   {
     id: 'nvidia-nim',
@@ -518,7 +521,11 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     // Prices, windows and retirement dates from platform.claude.com (pricing,
     // model deprecations), read 2026-10-18. Claude 3.7 Sonnet
     // and 3.5 Haiku retired 2026-02-19 and Opus 4.1 on 2026-08-05; they are gone
-    // rather than left to 404. Sonnet 4.5 is deprecated and retires 2026-11-30.
+    // rather than left to 404. Sonnet 4.5 retires 2026-11-30 and is replaced
+    // by Sonnet 4.6, read 2026-10-24: same $3/$15, the full 1M window at that
+    // price, 128K output. It accepts sampling parameters and a forced
+    // tool_choice, which is why it and not Sonnet 5.5 (see below) takes the
+    // slot. It rejects assistant prefill, so it does not carry 'prefill'.
     //
     // No json_mode: the Anthropic adapter does not translate response_format,
     // so a JSON-mode request routed here had the setting silently dropped.
@@ -532,9 +539,13 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     // prompts, which a single per-MTok figure cannot represent.
     models: [
       chat('claude-opus-4-5-20251101', 'Claude Opus 4.5', 200_000, 64_000, 5.0, 25.0, 60, [...ANTHROPIC, 'prefill']),
-      chat('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', 200_000, 64_000, 3.0, 15.0, 75, [...ANTHROPIC, 'prefill']),
+      chat('claude-sonnet-4-6', 'Claude Sonnet 4.6', 1_000_000, 128_000, 3.0, 15.0, 75, ANTHROPIC),
       chat('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 200_000, 64_000, 1.0, 5.0, 140, [...ANTHROPIC, 'prefill']),
     ],
+    retiredModels: {
+      'claude-sonnet-4-5-20250929': 'claude-sonnet-4-6',
+      'claude-sonnet-4-5': 'claude-sonnet-4-6',
+    },
   },
   {
     id: 'xai',

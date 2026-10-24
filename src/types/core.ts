@@ -94,6 +94,14 @@ export interface ProviderCatalogEntry {
   freeTier: FreeTier | null;
   modalities: Modality[];
   models: CatalogModel[];
+  /**
+   * Retired model id -> the catalog model that now serves it. A client, a
+   * policy member or a logged attempt that still names a retired model keeps
+   * resolving instead of becoming unrecognized: a pin would 404, a policy
+   * member would silently drop out, and a bare id would fall through to "auto".
+   * Keys are lower-case; every value must be an id in `models`.
+   */
+  retiredModels?: Readonly<Record<string, string>>;
   /** Brand hex colour, e.g. "#F55036". Drives the dashboard spectrum. */
   accent: string;
   /** False for local runtimes like Ollama that need no credential. */

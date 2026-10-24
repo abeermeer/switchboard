@@ -287,7 +287,7 @@ Be honest about these rather than papering over them:
   in-flight requests 10 s; a longer stream is cut.
 - **The Claude 5.5 models are not in the catalog.** They reject the sampling parameters
   and forced `tool_choice` the Anthropic adapter passes through; they need adapter support
-  first. Claude Sonnet 4.5 retires 2026-11-30 and must be removed from the catalog then.
+  first. Sonnet 4.6 holds the Sonnet slot until then.
 - **Paid transcription logs $0.** Spend and budgets cannot see per-minute billing.
 - **A same-machine proxy with no forwarding header looks local.** See the deliberate list
   above; documented, not fixable in code.
