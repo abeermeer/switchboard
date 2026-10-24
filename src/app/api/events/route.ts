@@ -1,12 +1,13 @@
 import { snapshotAll } from '@/lib/resilience/breaker';
 import { listRequestLogs } from '@/lib/db/repos/log';
 import { usageTotals } from '@/lib/db/repos/usage';
-import { requireLocalOrToken } from '@/lib/auth/session';
+import { adminGate } from '@/lib/auth/access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const TICK_MS = 2_000;
+const REVALIDATE_EVERY = 15;
 
 /**
  * One SSE stream feeding the whole dashboard.
@@ -16,7 +17,7 @@ const TICK_MS = 2_000;
  * hold eight sockets and run eight copies of this query loop.
  */
 export function GET(req: Request): Response {
-  const denied = requireLocalOrToken(req);
+  const denied = adminGate(req);
   if (denied !== null) return denied;
 
   const encoder = new TextEncoder();
@@ -35,8 +36,17 @@ export function GET(req: Request): Response {
         }
       };
 
+      let ticks = 0;
       const tick = (): void => {
         if (closed) return;
+        // A rotated token signs browsers out of every request but this one,
+        // which would otherwise keep streaming prompts for as long as it stays
+        // open. Re-check the caller every 30 seconds.
+        ticks += 1;
+        if (ticks % REVALIDATE_EVERY === 0 && adminGate(req) !== null) {
+          close();
+          return;
+        }
         try {
           send('health', snapshotAll());
 

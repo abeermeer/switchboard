@@ -217,6 +217,36 @@ export const MIGRATIONS: Migration[] = [
     CREATE INDEX idx_rate_limit_second ON rate_limit_hits(second_ts);
     `,
   },
+  {
+    version: 3,
+    name: 'api_key_spend',
+    sql: `
+    -- Month-to-date spend per API key, kept apart from the request log.
+    --
+    -- Budgets used to be summed from request_log, which log retention prunes
+    -- and "clear logs" empties. Either one quietly reset every key's monthly
+    -- budget. This table is only ever added to, one row per key per UTC month.
+    --
+    -- No foreign key, like rate_limit_hits: a key deleted mid-month must not
+    -- turn the hot-path write into a cascade, and its spend is history.
+    CREATE TABLE api_key_spend (
+      api_key_id TEXT NOT NULL,
+      month_ts   INTEGER NOT NULL,
+      cost_usd   REAL NOT NULL DEFAULT 0,
+      PRIMARY KEY (api_key_id, month_ts)
+    );
+
+    -- Carry over whatever the log still holds, so an upgrade mid-month keeps
+    -- the spend recorded so far.
+    INSERT INTO api_key_spend (api_key_id, month_ts, cost_usd)
+      SELECT api_key_id,
+             CAST(strftime('%s', ts / 1000, 'unixepoch', 'start of month') AS INTEGER) * 1000,
+             SUM(cost_usd)
+        FROM request_log
+       WHERE api_key_id IS NOT NULL
+       GROUP BY 1, 2;
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

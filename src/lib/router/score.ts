@@ -160,7 +160,10 @@ export function scoreCandidates(
 
     // ── health ───────────────────────────────────────────────────────────────
     const successRate = snap?.successRate ?? 1;
-    const halfOpen = snap?.breaker === 'half-open';
+    // An eligible candidate whose breaker still reads "open" has an expired
+    // cooldown: whoever is sent there first takes the half-open trial, so it is
+    // ranked as one.
+    const halfOpen = snap?.breaker === 'half-open' || snap?.breaker === 'open';
     const healthValue = halfOpen ? successRate * 0.5 : successRate;
     factors.push({
       name: 'health',

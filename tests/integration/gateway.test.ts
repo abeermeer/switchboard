@@ -1,17 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OPTIONS as chatOptions, POST as chatPost } from '@/app/v1/chat/completions/route';
 import { GET as modelsGet } from '@/app/v1/models/route';
+import { POST as moderationsPost } from '@/app/v1/moderations/route';
+import { POST as speechPost } from '@/app/v1/audio/speech/route';
+import { POST as transcriptionsPost } from '@/app/v1/audio/transcriptions/route';
 import { POST as bootstrapPost } from '@/app/api/system/bootstrap/route';
 import { createConnection } from '@/lib/db/repos/connections';
 import { setCredential } from '@/lib/db/repos/credentials';
 import { createApiKey } from '@/lib/db/repos/apiKeys';
-import { listCombos } from '@/lib/db/repos/combos';
+import { deleteCombo, ensureSeedCombos, listCombos, updateCombo } from '@/lib/db/repos/combos';
 import { listRequestLogs, getRequestLog } from '@/lib/db/repos/log';
 import { clearRateLimit } from '@/lib/auth/rateLimit';
 import { reloadMasterKey } from '@/lib/crypto/vault';
 import { dropDb, freshDb } from '../helpers/db';
 import { chatOk, jsonRequest, providerError, stubUpstream, type Upstream } from '../helpers/upstream';
 
+const BASE_URL = 'http://127.0.0.1:7272';
 const CHAT_URL = 'http://127.0.0.1:7272/v1/chat/completions';
 const MODELS_URL = 'http://127.0.0.1:7272/v1/models';
 const BOOTSTRAP_URL = 'http://127.0.0.1:7272/api/system/bootstrap';
@@ -162,6 +166,78 @@ describe('gateway integration', () => {
       expect(second.status).toBe(429);
       expect(Number(second.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
     });
+
+    // Stored on every key since the first release and never read: a key
+    // limited to `free-only` could still name any policy or paid model.
+    it('refuses a policy the key is not allowed to use', async () => {
+      const { secret } = createApiKey({ name: 'free only', allowedCombos: ['free-only'] });
+      const headers = { authorization: `Bearer ${secret}` };
+
+      for (const model of ['auto', 'quality', 'groq/llama-3.3-70b-versatile', 'llama-3.3-70b-versatile']) {
+        const res = await chatPost(jsonRequest(CHAT_URL, { ...HELLO, model }, headers));
+        expect(res.status, model).toBe(403);
+        const body = (await res.json()) as { error: { code: string } };
+        expect(body.error.code).toBe('model_not_allowed');
+      }
+    });
+
+    it('serves a policy the key is allowed to use', async () => {
+      ensureSeedCombos();
+      const { secret } = createApiKey({ name: 'auto only', allowedCombos: ['auto'] });
+
+      const res = await chatPost(
+        jsonRequest(CHAT_URL, { ...HELLO, model: 'auto' }, { authorization: `Bearer ${secret}` }),
+      );
+      expect(res.status).toBe(200);
+    });
+
+    // A disabled, deleted or renamed policy's old slug no longer matches, so the
+    // router took it for an unknown model and served it through the default
+    // policy with no ceiling: one click turned a restricted key unrestricted.
+    it.each(['disabled', 'deleted'])('refuses a restricted key whose policy was %s', async (action) => {
+      ensureSeedCombos();
+      const { secret } = createApiKey({ name: 'free only', allowedCombos: ['free-only'] });
+      const combo = listCombos().find((c) => c.slug === 'free-only')!;
+      if (action === 'disabled') updateCombo(combo.id, { enabled: false });
+      else deleteCombo(combo.id);
+
+      const res = await chatPost(
+        jsonRequest(CHAT_URL, { ...HELLO, model: 'free-only' }, { authorization: `Bearer ${secret}` }),
+      );
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('policy_unavailable');
+    });
+
+    it('applies the restriction on /v1/audio/speech too, which skips the shared handler', async () => {
+      const { secret } = createApiKey({ name: 'free only', allowedCombos: ['free-only'] });
+
+      const res = await speechPost(
+        jsonRequest(`${BASE_URL}/v1/audio/speech`, { model: 'tts-1', input: 'hi', voice: 'alloy' }, {
+          authorization: `Bearer ${secret}`,
+        }),
+      );
+      expect(res.status).toBe(403);
+    });
+
+    it('does not forward fields that would let the upstream pick another model', async () => {
+      await chatPost(
+        jsonRequest(CHAT_URL, { ...HELLO, models: ['anthropic/claude-opus-4.5'], route: 'fallback' }),
+      );
+
+      const sent = upstream?.calls[0]?.body as Record<string, unknown>;
+      expect(sent.models).toBeUndefined();
+      expect(sent.route).toBeUndefined();
+    });
+
+    it('treats an empty allow-list as every policy, as the dashboard says', async () => {
+      const { secret } = createApiKey({ name: 'unrestricted', allowedCombos: [] });
+
+      const res = await chatPost(
+        jsonRequest(CHAT_URL, { ...HELLO, model: 'llama-3.3-70b-versatile' }, { authorization: `Bearer ${secret}` }),
+      );
+      expect(res.status).toBe(200);
+    });
   });
 
   // ── request validation ────────────────────────────────────────────────────
@@ -265,6 +341,84 @@ describe('gateway integration', () => {
 
       const res = await chatPost(jsonRequest(CHAT_URL, HELLO));
       expect(res.headers.get('x-switchboard-fallback-reason')).toBeNull();
+    });
+
+    it('says so when it serves a model the client did not ask for', async () => {
+      upstream = stubUpstream([chatOk()]);
+
+      const res = await chatPost(jsonRequest(CHAT_URL, { ...HELLO, model: 'gpt-4o' }));
+      expect(res.status).toBe(200);
+      expect(res.headers.get('x-switchboard-substituted')).toBe('gpt-4o');
+    });
+
+    it('does not flag a model it recognised', async () => {
+      upstream = stubUpstream([chatOk()]);
+
+      const res = await chatPost(jsonRequest(CHAT_URL, { ...HELLO, model: 'llama-3.3-70b-versatile' }));
+      expect(res.headers.get('x-switchboard-substituted')).toBeNull();
+    });
+  });
+
+  // ── moderations ───────────────────────────────────────────────────────────
+
+  describe('POST /v1/moderations', () => {
+    // Advertised in the README since the first release, but no catalog model
+    // served the modality, so it answered 404 with OpenAI connected.
+    it('is served by OpenAI once it is connected', async () => {
+      const openai = createConnection({ providerId: 'openai' });
+      setCredential(openai.id, 'sk-test-openai-000000000000');
+      upstream = stubUpstream([
+        { status: 200, json: { id: 'modr-1', model: 'omni-moderation-latest', results: [{ flagged: false }] } },
+      ]);
+
+      const res = await moderationsPost(
+        jsonRequest('http://127.0.0.1:7272/v1/moderations', { input: 'hello' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(upstream.calls[0]?.url).toBe('https://api.openai.com/v1/moderations');
+      expect((upstream.calls[0]?.body as { model?: string }).model).toBe('omni-moderation-latest');
+      expect(res.headers.get('x-switchboard-cost-usd')).toBe('0.000000');
+    });
+  });
+
+  // ── transcriptions ────────────────────────────────────────────────────────
+
+  describe('POST /v1/audio/transcriptions', () => {
+    function audioForm(fields: Record<string, string> = {}): Request {
+      const form = new FormData();
+      form.append('file', new Blob([new Uint8Array([0, 1, 2, 3])], { type: 'audio/wav' }), 'clip.wav');
+      for (const [key, value] of Object.entries(fields)) form.append(key, value);
+      return new Request(`${BASE_URL}/v1/audio/transcriptions`, { method: 'POST', body: form });
+    }
+
+    beforeEach(() => {
+      const groq = createConnection({ providerId: 'groq' });
+      setCredential(groq.id, 'gsk_test_audio');
+    });
+
+    it('transcribes through a free-tier provider', async () => {
+      upstream = stubUpstream([{ status: 200, json: { text: 'hello' } }]);
+
+      const res = await transcriptionsPost(audioForm({ model: 'whisper-large-v3-turbo' }));
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ text: 'hello' });
+      expect(upstream.calls[0]?.url).toBe('https://api.groq.com/openai/v1/audio/transcriptions');
+    });
+
+    it('accepts the optional prompt, which used to fail the context check', async () => {
+      // The prompt is text, so it was estimated as input tokens against a 448
+      // token window the output reservation already filled. Every request that
+      // carried one was refused before it reached a provider.
+      upstream = stubUpstream([{ status: 200, json: { text: 'hello' } }]);
+
+      const res = await transcriptionsPost(
+        audioForm({ model: 'whisper-large-v3-turbo', prompt: 'Switchboard, Kubernetes, Groq, Cerebras' }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(upstream.calls).toHaveLength(1);
     });
   });
 

@@ -1,5 +1,12 @@
 import { route } from '@/lib/router';
-import { authenticate, corsHeaders, jsonError, preflight, statusForErrorKind } from '@/lib/api/respond';
+import {
+  authenticate,
+  corsHeaders,
+  jsonError,
+  policyDenied,
+  preflight,
+  statusForErrorKind,
+} from '@/lib/api/respond';
 import { speechSchema, firstIssue } from '@/lib/api/schemas';
 
 export const runtime = 'nodejs';
@@ -25,9 +32,16 @@ export async function POST(req: Request): Promise<Response> {
   if (!parsed.success) return jsonError(400, firstIssue(parsed.error));
 
   const body = parsed.data as Record<string, unknown>;
+  const requestedModel = typeof body['model'] === 'string' ? body['model'] : 'auto';
+
+  // This route skips the shared handler, so it has to apply a key's policy
+  // restriction itself.
+  const notAllowed = policyDenied(auth.key, requestedModel, req);
+  if (notAllowed !== null) return notAllowed;
+
   const result = await route({
     modality: 'audio.speech',
-    requestedModel: typeof body['model'] === 'string' ? body['model'] : 'auto',
+    requestedModel,
     body,
     stream: true,
     apiKey: auth.key,

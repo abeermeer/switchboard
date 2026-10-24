@@ -37,6 +37,8 @@ export interface RouteResult {
   response: AdapterResponse | null;
   decision: RoutingDecision;
   error: AdapterError | null;
+  /** The model string matched nothing and was routed as "auto". */
+  unrecognizedModel: boolean;
 }
 
 /** Rotates round-robin selection across requests within this process. */
@@ -92,6 +94,7 @@ export async function route(input: RouteInput): Promise<RouteResult> {
       response: null,
       decision: { ...baseDecision, totalDurationMs: Date.now() - startedAt },
       error: { kind: 'unsupported', message: expanded.hardError, retryAfterSec: null, raw: null },
+      unrecognizedModel: false,
     };
   }
 
@@ -105,6 +108,7 @@ export async function route(input: RouteInput): Promise<RouteResult> {
         retryAfterSec: null,
         raw: null,
       },
+      unrecognizedModel: expanded.unrecognizedModel,
     };
   }
 
@@ -127,6 +131,7 @@ export async function route(input: RouteInput): Promise<RouteResult> {
       totalDurationMs: Date.now() - startedAt,
     },
     error: executed.error,
+    unrecognizedModel: expanded.unrecognizedModel,
   };
 }
 

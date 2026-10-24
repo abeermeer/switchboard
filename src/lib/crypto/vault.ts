@@ -43,7 +43,7 @@ export function ensureMasterKey(): Buffer {
   const path = masterKeyPath();
   if (existsSync(path)) return adopt(readFileSync(path), path);
 
-  mkdirSync(dirname(path), { recursive: true });
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const generated = randomBytes(KEY_BYTES);
   try {
     // 'wx' fails rather than clobbering: if a second process generated a key

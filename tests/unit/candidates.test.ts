@@ -10,7 +10,7 @@ import {
 } from '@/lib/router/estimate';
 import { createConnection, updateConnection } from '@/lib/db/repos/connections';
 import { setCredential } from '@/lib/db/repos/credentials';
-import { createCombo, updateCombo } from '@/lib/db/repos/combos';
+import { createCombo, ensureSeedCombos, setComboMembers, updateCombo } from '@/lib/db/repos/combos';
 import { defaultHealthRow, setLockout, upsertHealthRow } from '@/lib/db/repos/health';
 import { recordUsageBucket } from '@/lib/db/repos/usage';
 import { findModel } from '@/lib/providers/registry';
@@ -254,6 +254,146 @@ describe('router/expandCandidates', () => {
 
       expect(res.candidates).toHaveLength(1);
       expect(res.candidates[0]?.modelId).toBe('deepseek-ai/DeepSeek-V3');
+    });
+  });
+
+  // Every real install seeds these on first load, and `auto` is the default.
+  // The suite never did, which is how a pinned provider fanning out to the
+  // whole fleet survived 1,000 green tests.
+  describe('with the seeded default policies', () => {
+    beforeEach(() => {
+      ensureSeedCombos();
+    });
+
+    it('still pins "provider/model" to that provider and model', () => {
+      connect('groq');
+      connect('cerebras');
+
+      const res = expandCandidates(ex('groq/llama-3.3-70b-versatile'));
+
+      expect(res.combo).toBeNull();
+      expect(res.candidates).toHaveLength(1);
+      expect(res.candidates[0]?.providerId).toBe('groq');
+      expect(res.candidates[0]?.modelId).toBe('llama-3.3-70b-versatile');
+      expect(res.unrecognizedModel).toBe(false);
+    });
+
+    it('serves a bare model id from every provider offering it, and only that model', () => {
+      connect('groq');
+      connect('cerebras');
+
+      const res = expandCandidates(ex('llama-3.1-8b-instant'));
+
+      expect(res.combo).toBeNull();
+      expect(res.candidates.every((c) => c.modelId === 'llama-3.1-8b-instant')).toBe(true);
+    });
+
+    it('does not let a default policy with members hijack a named model', () => {
+      const groq = connect('groq');
+      const cerebras = connect('cerebras');
+      const auto = createCombo({ slug: 'pinned-default', name: 'd', strategy: 'priority', requires: [] });
+      setComboMembers(auto.id, [{ connectionId: cerebras, modelId: '*', order: 0, weight: 1, enabled: true }]);
+      updateCombo(auto.id, { isDefault: true });
+
+      const res = expandCandidates(ex('groq/llama-3.3-70b-versatile'));
+
+      expect(res.candidates.map((c) => c.connectionId)).toEqual([groq]);
+    });
+
+    it('routes "auto" through the default policy without calling it a substitution', () => {
+      connect('groq');
+
+      const res = expandCandidates(ex('auto'));
+
+      expect(res.combo?.slug).toBe('auto');
+      expect(res.unrecognizedModel).toBe(false);
+    });
+
+    it('routes an unknown model through the default policy and flags it', () => {
+      connect('groq');
+
+      const res = expandCandidates(ex('gpt-4o'));
+
+      expect(res.combo?.slug).toBe('auto');
+      expect(res.candidates.length).toBeGreaterThan(0);
+      expect(res.unrecognizedModel).toBe(true);
+    });
+
+    it('serves a catalog id that contains a slash instead of reading it as a pin', () => {
+      // Groq's own model id starts with "openai/". Treated as a pin it answered
+      // 404 'not available on OpenAI', though /v1/models advertised it.
+      connect('groq');
+
+      const res = expandCandidates(ex('openai/gpt-oss-120b'));
+
+      expect(res.hardError).toBeNull();
+      expect(res.candidates.map((c) => `${c.providerId}:${c.modelId}`)).toEqual(['groq:openai/gpt-oss-120b']);
+    });
+
+    it('serves an OpenRouter id even with no connection for the provider its prefix names', () => {
+      connect('openrouter');
+
+      const res = expandCandidates(ex('openai/gpt-4o-mini'));
+
+      expect(res.hardError).toBeNull();
+      expect(res.candidates.map((c) => c.providerId)).toEqual(['openrouter']);
+    });
+
+    it('offers both readings when both exist, which is a free failover', () => {
+      connect('openai');
+      connect('openrouter');
+
+      const res = expandCandidates(ex('openai/gpt-4o-mini'));
+
+      expect(new Set(res.candidates.map((c) => c.providerId))).toEqual(new Set(['openai', 'openrouter']));
+    });
+
+    it('lets free-only use only OpenRouter models that are actually free', () => {
+      // OpenRouter's allowance covers its `:free` variants. Its paid models fell
+      // under the $1/MTok heuristic, so free-only routed to them and logged $0.
+      connect('openrouter');
+
+      const res = expandCandidates(ex('free-only'));
+      const eligible = res.candidates.filter((c) => c.excludedReason === null).map((c) => c.modelId);
+
+      expect(eligible.length).toBeGreaterThan(0);
+      expect(eligible.every((id) => id.endsWith(':free'))).toBe(true);
+      const flash = res.candidates.find((c) => c.modelId === 'google/gemini-2.5-flash');
+      expect(flash?.tier).not.toBe('free');
+    });
+
+    it('keeps free-only off paid transcription, which has no per-token price', () => {
+      // Whisper is billed per audio minute. At $0 per token, OpenAI's paid
+      // whisper-1 ranked as free and passed the $0 ceiling.
+      connect('openai');
+      connect('groq');
+
+      const res = expandCandidates(ex('free-only', { modality: 'audio.transcription', inputTokens: 0 }));
+      const byProvider = new Map(res.candidates.map((c) => [c.providerId, c]));
+
+      expect(byProvider.get('groq')?.excludedReason).toBeNull();
+      expect(byProvider.get('groq')?.tier).toBe('free');
+      expect(byProvider.get('openai')?.excludedReason).toMatch(/audio minute/);
+      expect(byProvider.get('openai')?.tier).toBe('standard');
+    });
+
+    it('still routes paid transcription when no ceiling applies', () => {
+      connect('openai');
+
+      const res = expandCandidates(ex('auto', { modality: 'audio.transcription', inputTokens: 0 }));
+
+      expect(res.candidates.find((c) => c.modelId === 'whisper-1')?.excludedReason).toBeNull();
+    });
+
+    it('ignores a disabled default policy', () => {
+      connect('groq');
+      const auto = expandCandidates(ex('auto')).combo;
+      updateCombo(auto!.id, { enabled: false });
+
+      const res = expandCandidates(ex('gpt-4o'));
+
+      expect(res.combo).toBeNull();
+      expect(res.unrecognizedModel).toBe(true);
     });
   });
 

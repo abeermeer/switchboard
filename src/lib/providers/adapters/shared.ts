@@ -124,10 +124,22 @@ export function normalizeUsage(raw: unknown): TokenUsage | null {
     return null;
   }
 
+  // TokenUsage.completionTokens includes reasoning. OpenAI and DeepSeek already
+  // count it inside completion_tokens; Gemini reports thoughts beside
+  // candidatesTokenCount, and some OpenAI-compatible providers do the same,
+  // which their total gives away (prompt + completion + reasoning). Billing
+  // reasoning on top of an OpenAI completion count overstated an o4-mini
+  // request by 64%.
+  const reportedSeparately =
+    reasoningTokens > 0 &&
+    (finiteNumber(raw.thoughtsTokenCount) !== null ||
+      (declaredTotal > 0 && declaredTotal >= promptTokens + completionTokens + reasoningTokens));
+  const billedOutput = reportedSeparately ? completionTokens + reasoningTokens : completionTokens;
+
   return {
     promptTokens,
-    completionTokens,
-    totalTokens: declaredTotal > 0 ? declaredTotal : promptTokens + completionTokens,
+    completionTokens: billedOutput,
+    totalTokens: declaredTotal > 0 ? declaredTotal : promptTokens + billedOutput,
     cachedTokens,
     reasoningTokens,
   };
@@ -256,7 +268,20 @@ export function extractErrorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-const CONTEXT_LENGTH_RE = /context|token|too long|maximum|too large|exceeds/i;
+/**
+ * Phrases providers use for an over-long prompt, and nothing broader. The old
+ * pattern matched any 400 that mentioned "token" or "maximum", so "max_tokens
+ * must be <= 8192" or "maximum value for temperature is 2" became
+ * context_length: retried on every remaining provider and counted against
+ * each one's breaker, for a request that could never succeed.
+ *
+ * An output cap is a size limit too, and one another model can meet: Haiku
+ * stops at 64K output tokens where Sonnet does not. So "max_tokens: 100000 >
+ * 64000" stays context_length and the walk moves to a bigger model, while
+ * "max_tokens must be a positive integer" is a malformed request.
+ */
+const CONTEXT_LENGTH_RE =
+  /context.?(length|window|limit)|maximum context|too many (input )?tokens|(prompt|input|message)s? (is|are) too long|reduce the length|too large for (the )?model|token limit|exceeds? the (model'?s )?(maximum|max|context)|maximum allowed number of output tokens|max(_completion|_new|_output)?_tokens\b[^.]{0,60}?(must be (less|<=|at most|no (more|greater))|exceeds?|greater than|too (large|high|big)|> ?\d)/i;
 const QUOTA_RE = /quota|billing|credit|insufficient.?(balance|funds)|payment|spend limit/i;
 const MODEL_MISSING_RE = /model|not found|does not exist|unsupported|unknown|no such/i;
 

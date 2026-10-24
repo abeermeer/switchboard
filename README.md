@@ -1,7 +1,7 @@
 # Switchboard
 
 [![CI](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml/badge.svg)](https://github.com/abeermeer/switchboard/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1035-3ecf8e.svg)](#tests)
+[![Tests](https://img.shields.io/badge/tests-1134-3ecf8e.svg)](#tests)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522.13-f0912f.svg)](https://nodejs.org)
 
@@ -24,9 +24,9 @@ no account, no cloud control plane.
 
 ## Demo
 
-[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/download/v0.4.1/brag.mp4)
+[![Switchboard — every candidate, every factor](brag-output/brag.jpg)](https://github.com/abeermeer/switchboard/releases/latest/download/brag.mp4)
 
-**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/download/v0.4.1/brag.mp4)**
+**[▶ Watch the 20-second walkthrough](https://github.com/abeermeer/switchboard/releases/latest/download/brag.mp4)**
 
 A provider 429s mid-request, the fallback lands on a different one, and the decision trace
 explains exactly why the replacement won. Every number on screen is real output from a
@@ -74,7 +74,8 @@ its work**.
 ```bash
 git clone https://github.com/abeermeer/switchboard.git
 cd switchboard
-npm install && npm run build
+npm install
+npm run build
 npm install -g .          # puts `switchboard` and `sb` on your PATH
 switchboard
 ```
@@ -82,15 +83,39 @@ switchboard
 That's it. The dashboard is on **http://localhost:7272**, the gateway on
 **http://localhost:7272/v1**.
 
+**No Git?** A fresh Windows machine usually has none. Download the source as a ZIP instead;
+`curl.exe` and `tar` ship with Windows 10 and 11, and this works in Command Prompt and
+PowerShell alike (Node 22.13+ still required):
+
+```bat
+curl.exe -L -o switchboard.zip https://github.com/abeermeer/switchboard/archive/refs/heads/main.zip
+tar -xf switchboard.zip
+cd switchboard-main
+npm install
+npm run build
+npm install -g .
+switchboard
+```
+
+One command per line on purpose: Windows PowerShell 5.1, the default on Windows 10, rejects
+`&&`.
+
+`npm install -g .` links the command to that folder, so keep it; your data lives elsewhere.
+
 > **Not on npm yet.** The package name is **`switchboard-gateway`** and
 > `npm install -g switchboard-gateway` will be the one-liner once it is published — plain
 > `switchboard` on npm is an unrelated 2022 event-listener library with no executable, so
-> installing *that* leaves you with no command at all. Until the publish lands, use the four
+> installing *that* leaves you with no command at all. Until the publish lands, use the
 > lines above; they install the same artefact CI verifies on every commit.
 
 Your database and encryption key live in your OS application-data directory
 (`%APPDATA%\Switchboard`, `~/Library/Application Support/Switchboard`, or
-`~/.local/share/Switchboard`), so reinstalling or upgrading never touches them.
+`~/.local/share/Switchboard`), so reinstalling, upgrading or deleting the clone never
+touches them. (Installs up to v0.4.1 kept them in `<clone>/data`; `sb start` keeps
+using that folder if it finds a database there, and tells you to move it.)
+
+The gateway listens on `127.0.0.1` only. `sb start --host 0.0.0.0` puts it on your
+network; see [Remote access](#remote-access) first.
 
 **2) Connect a free provider**
 
@@ -129,20 +154,34 @@ npm start
 
 ```bash
 docker build -t switchboard .
-docker run -d -p 7272:7272 -v switchboard-data:/data switchboard
+docker run -d --name switchboard -p 127.0.0.1:7272:7272 -v switchboard-data:/data switchboard
 ```
+
+Inside the container the gateway listens on all interfaces, so what can reach it is decided
+by `-p`; publishing on `127.0.0.1` keeps it on your machine. Requests arriving through
+Docker's port forward do not count as local, so open the dashboard with the token:
+
+```bash
+docker exec switchboard node bin/sb.mjs token   # then visit /dashboard?token=<token> once
+```
+
+Do not reach for `-e SWITCHBOARD_ALLOW_REMOTE=1` to skip that step. Other containers on the
+same Docker network reach the gateway directly, whatever `-p` says, and that flag would give
+every one of them the dashboard and an open gateway.
 
 **Desktop app** — `npm run electron:build:win` (or `:mac` / `:linux`) puts an installer in
 `release/`. Runs in the tray with start-at-login.
 
-**Pin to a release line** — every version is branched and tagged, so you can track one
-without waiting on npm:
+**Pin to a release.** Every version is branched and tagged, so you can install a known
+one instead of whatever is on `main` today:
 
 ```bash
-git clone -b release/v0.4.1 https://github.com/abeermeer/switchboard.git
+git clone -b release/v0.5.0 https://github.com/abeermeer/switchboard.git
 ```
 
-Once the npm publish lands, `npm install -g switchboard-gateway@0.4.1` does the same.
+Once the npm publish lands, `npm install -g switchboard-gateway@0.5.0` does the same.
+Versions before 0.5.0 let anyone on your network take over the dashboard; do not pin to
+them.
 
 </details>
 
@@ -153,13 +192,6 @@ policy slug you have defined.
 ---
 
 ## Point your tools at it
-
-**Claude Code**
-
-```bash
-export ANTHROPIC_BASE_URL="http://127.0.0.1:7272/v1"
-export ANTHROPIC_API_KEY="sb-live-your-key"
-```
 
 **Cursor** — Settings → Models → Override OpenAI Base URL
 
@@ -195,6 +227,11 @@ const client = new OpenAI({
 **Cline / Continue / Aider** — any "OpenAI-compatible endpoint" field takes the same base
 URL and key.
 
+**Not supported yet: Anthropic-protocol clients.** The gateway speaks the OpenAI wire
+format only. There is no `/v1/messages`, so tools configured through `ANTHROPIC_BASE_URL`
+(Claude Code among them) cannot use it. Anthropic models are reachable the other way
+round: connect an Anthropic key and call them through `/v1/chat/completions`.
+
 ---
 
 ## Endpoints
@@ -205,10 +242,10 @@ URL and key.
 | `POST` | `/v1/completions` | Legacy, shimmed onto chat |
 | `POST` | `/v1/embeddings` | |
 | `POST` | `/v1/images/generations` | |
-| `POST` | `/v1/audio/speech` | Returns audio bytes |
+| `POST` | `/v1/audio/speech` | Route only: no provider in the catalog serves text-to-speech yet |
 | `POST` | `/v1/audio/transcriptions` | Multipart upload |
 | `POST` | `/v1/rerank` | |
-| `POST` | `/v1/moderations` | |
+| `POST` | `/v1/moderations` | Served by OpenAI's free `omni-moderation-latest` |
 | `GET` | `/v1/models` | Every model across every connected provider |
 | `GET` | `/v1/models/{model}` | |
 
@@ -325,9 +362,11 @@ Everything is optional; sane defaults are generated on first run.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `7272` | Gateway and dashboard |
-| `SWITCHBOARD_DATA_DIR` | `./data` | Database, key vault, logs |
+| `SWITCHBOARD_HOST` | `127.0.0.1` | Interface to listen on; `0.0.0.0` exposes it to your network |
+| `SWITCHBOARD_DATA_DIR` | OS app-data folder for `switchboard` and the desktop app; `./data` under `npm start` and `npm run dev` | Database, key vault, logs |
 | `SWITCHBOARD_MASTER_KEY` | generated | Base64 32-byte key for credential encryption |
-| `SWITCHBOARD_ALLOW_REMOTE` | `0` | Allow non-loopback dashboard access |
+| `SWITCHBOARD_ALLOW_REMOTE` | `0` | Treat remote callers as trusted: dashboard without the token, gateway without a key until one exists |
+| `SWITCHBOARD_ALLOWED_HOSTS` | *(none)* | Hostnames to answer besides IP addresses and `localhost`, e.g. a reverse proxy's name |
 | `SWITCHBOARD_CORS_ORIGINS` | *(none)* | Origins allowed to call `/v1` from a browser |
 | `SWITCHBOARD_LOG_LEVEL` | `info` / `debug` | `debug` · `info` · `warn` · `error` · `silent` |
 | `SWITCHBOARD_LOG_FORMAT` | auto | `json`, or `pretty` in a TTY |
@@ -336,6 +375,36 @@ Everything is optional; sane defaults are generated on first run.
 Provider credentials are sealed with **AES-256-GCM** before they touch disk. The master key
 lives in `<data-dir>/master.key` with `0600` permissions. No endpoint returns a stored
 credential — only a four-character hint.
+
+### Remote access
+
+Switchboard listens on `127.0.0.1` unless you pass `--host 0.0.0.0` (or set
+`SWITCHBOARD_HOST`). Who counts as local is decided from the socket by `server.mjs`, not
+from a header a client can forge. A request carrying a forwarding header
+(`X-Forwarded-For`, `Forwarded` or `X-Real-IP`) counts as remote even from `127.0.0.1`.
+
+**A reverse proxy on the same machine must send one of those headers.** Its connection
+comes from loopback, so the header is the only way to tell. nginx sends none by default, and
+its default `Host` is the upstream address: a bare `proxy_pass` makes every request from
+the internet look local, with full dashboard access. Add
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`. Caddy, Traefik and Apache
+send it by default. See [docs/deployment.md](docs/deployment.md#exposing-it-beyond-localhost).
+
+From another machine:
+
+- **Dashboard and management API:** run `sb token` on the host, then open
+  `/dashboard?token=<token>` once; it becomes an HttpOnly cookie. Scripts can send it in
+  the `x-switchboard-token` header (the CLI reads `SWITCHBOARD_TOKEN`). `sb token --rotate`
+  signs every browser out. Only a shell on the host can read or rotate the token.
+- **Gateway:** remote callers always need an API key. With no key created yet, the gateway
+  only answers the machine it runs on.
+- **Behind your own auth** (a reverse proxy, a tunnel): `SWITCHBOARD_ALLOW_REMOTE=1` skips
+  both of the above, and `SWITCHBOARD_ALLOWED_HOSTS` lists the proxy's hostname.
+
+Two attacks come from your own browser rather than the network, so they apply even on
+loopback: a page that rebinds its domain to `127.0.0.1` is refused because only IP
+addresses, `localhost` and listed names are answered; and a page posting to the dashboard
+is refused because writes from another origin are rejected.
 
 ### CORS
 
@@ -352,7 +421,9 @@ SWITCHBOARD_CORS_ORIGINS=http://localhost:3000,https://myapp.example
 
 Allowed origins are reflected rather than wildcarded, with `Vary: Origin` so a shared cache
 cannot hand one origin's response to another. `*` still works if you want the old
-behaviour, but it is now a decision rather than a default.
+behaviour, but it is now a decision rather than a default. A browser request from an origin
+that is not listed is refused outright, not just left unreadable: if a page may not read
+the answer, it may not spend money producing it either.
 
 ### Logging
 
@@ -361,8 +432,10 @@ like credentials are redacted before anything is written — by key name (`autho
 `api_key`, `token`, …) and by shape, so a key pasted into free text is caught too.
 
 ```bash
-switchboard 2>&1 | jq 'select(.level == "warn")'
+switchboard 2>&1 | jq -R 'fromjson? | select(.level == "warn")'
 ```
+
+`-R` with `fromjson?` skips the startup banner, which is not JSON.
 
 The same redaction runs on the way **into** the database. Every request log row stores the
 request body, the response and the routing decision, so a client that sends its own provider
@@ -379,7 +452,7 @@ forever, which is a legitimate choice rather than an unconfigured one.
 ## CLI
 
 ```bash
-sb start [--port] [--open]   # start the gateway
+sb start [--port] [--host] [--open]   # start the gateway (loopback unless --host)
 sb status                    # health at a glance
 sb doctor                    # diagnose the install
 sb providers list            # connections with status and spend
@@ -392,6 +465,7 @@ sb chat [--model]            # streaming REPL
 sb logs [--errors]           # recent requests
 sb usage [--days 7]          # spend summary
 sb open                      # open the dashboard
+sb token [--rotate]          # dashboard token for remote browsers
 ```
 
 ---
@@ -420,7 +494,8 @@ without handing over `ipcRenderer`, and `contextIsolation` / `sandbox` are still
 expensive half is a real `electron-builder` run on Windows and Linux in
 [desktop.yml](.github/workflows/desktop.yml), which also asserts the installer is larger
 than 20 MB — electron-builder exits 0 having shipped only the shell if the `files` globs are
-wrong.
+wrong. It then launches the packaged app and waits for its gateway to answer, since an
+installer of the right size once shipped a shell that could not start its server.
 
 ---
 
@@ -436,7 +511,8 @@ npm run verify:install # pack, install globally, run the command
 ```
 
 `verify:install` is the check that matters before a release: it packs the tarball, installs
-it into a throwaway global prefix, and runs `switchboard --version` and `sb --version`. Every
+it into a throwaway global prefix, runs `switchboard --version` and `sb --version`, and then
+starts the installed gateway and waits for it to answer. Every
 other check in CI runs against the repository, so none of them could tell that the published
 install instruction pointed at a different package entirely.
 
@@ -453,7 +529,7 @@ contribution workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 ### Tests
 
 ```bash
-npm run test:run     # ~1,035 tests
+npm run test:run     # ~1,134 tests
 npm run test:ci      # with coverage
 ```
 
@@ -482,8 +558,9 @@ fail loudly if anyone "simplifies" them away.
 ### Releases
 
 `main` is the development line. Every version is also cut as a `release/vX.Y.Z` branch with
-a matching tag and GitHub release, so you can pin to one and keep receiving fixes for that
-line without inheriting whatever landed on `main` today.
+a matching tag and GitHub release, so you can pin to a known version without inheriting
+whatever landed on `main` today. Release lines are not patched: fixes land on `main` and
+ship in the next version.
 
 Bumping `version` in `package.json` on `main` triggers it: CI typechecks, tests, builds,
 boots the gateway, verifies the publish tarball carries no database or key, then branches,
@@ -498,12 +575,12 @@ Pre-1.0, and specific about what that means.
 
 An external audit put it at **7.2/10** — strong on architecture, resilience and type
 safety, with test coverage scored **0/10** as the single largest gap, alongside five
-smaller findings. A second pass raised four more once those were closed. All ten are now
+smaller findings. Later passes raised more once those were closed. Every finding below is
 closed:
 
 | Finding | Resolution |
 | --- | --- |
-| No test suite | 1,035 tests; the routing core at 95–100% |
+| No test suite | 1,134 tests; the routing core at 95–100% |
 | Rate limiting reset on restart | Persisted in SQLite, counted per second so it stays cheap on the hot path |
 | `/v1` sent `Access-Control-Allow-Origin: *` | No CORS by default; explicit origin allowlist |
 | No structured logging | JSON logs with a tested redaction layer |
@@ -511,11 +588,22 @@ closed:
 | Failed requests skewed latency | Filtered to successes only |
 | Adapter translation barely covered (27%) | 121 tests across the Anthropic, Google and Cohere wire formats; adapters at 80% |
 | Management API routes untested | 47 integration tests driving the real handlers |
-| Log retention setting was never applied | Enforced on the health tick; `0` still means keep forever |
+| Log retention setting was never applied | Enforced on the health tick, which now actually starts (below); `0` still means keep forever |
 | Request payloads stored unredacted | Redacted at the storage boundary, not on the read path |
 | Desktop packaging unverified beyond local dev | `npm run verify:electron` on every CI leg, plus a real `electron-builder` run on Windows and Linux |
 | `npm install -g switchboard` installed someone else's package | Renamed to `switchboard-gateway`; CI now checks the registry name and installs the packed tarball to prove the command works |
 | `/api/system/status` reported a hardcoded `0.1.0` | Read from the manifest, with a test pinning it |
+| Anyone on the network could take over the dashboard (spoofable `X-Forwarded-For`, unguarded pages, no Host or Origin checks) | `server.mjs` binds loopback and reads the caller from the socket; `src/proxy.ts` guards every page; DNS rebinding and cross-site writes refused |
+| "Allowed policies" on an API key was never enforced | Checked on every gateway request |
+| `provider/model` pins fanned out to the whole fleet once the default policy existed | Resolution order fixed; tests now seed the real policies |
+| Docker image did not build; desktop app could not start its gateway | Both fixed and launched for real; desktop CI now waits for the packaged gateway to answer |
+| A fresh global install pulled a newer Next than the shipped build and could not start | `next`/`react` pinned; `verify:install` boots the installed command |
+| Reasoning tokens billed twice; disconnects still spent money; playground and replay spend uncounted; budgets reset by log pruning | Each fixed with a test that failed first |
+| The health loop never started, so probes, log retention and the lockout and latency sweeps never ran in a real install | Started at boot from `src/instrumentation.ts` |
+| Starter policies existed only once a dashboard page had rendered, so `free-only` from the CLI or API routed to paid models | Seeded at boot |
+| `free-only` could still spend money: OpenRouter's paid models and OpenAI's Whisper counted as free | Only OpenRouter's `:free` models count there, and per-minute billing is never treated as free |
+| A key restricted to a policy that was later deleted or disabled fell through to unrestricted routing | Refused with `policy_unavailable` |
+| Every transcription that sent Whisper's optional `prompt` was refused | The token-window check no longer applies to audio input |
 
 Writing the tests found three real bugs that had survived every manual check: a non-ASCII
 character in a provider's error message crashed the response instead of returning the
@@ -525,15 +613,29 @@ preferred it.
 
 **Still open**, and worth knowing before you rely on it:
 
-- **Not published to npm yet.** The name is reserved and the release workflow publishes as
-  soon as an `NPM_TOKEN` secret exists; until then the install is the four-line clone above.
+- **Not published to npm yet.** Nobody has published `switchboard-gateway` yet, so the name
+  is not held until the first release publishes it. The release workflow does that as soon
+  as an `NPM_TOKEN` secret exists; until then the install is the clone (or ZIP) above.
 - No tests for the DB repositories or most dashboard pages, and no end-to-end tests.
 - No audit log of administrative actions.
-- No graceful shutdown — `SIGTERM` kills in-flight streams rather than draining them.
+- Shutdown drains for 10 seconds only. `SIGTERM` stops new connections and lets in-flight
+  requests finish for up to 10 seconds; a stream still running after that is cut.
 - `context_length` counts toward the circuit breaker, unlike `bad_request`, so a client
-  looping oversized prompts can open the breaker on a healthy provider.
+  looping oversized prompts can open the breaker on a healthy provider. (Ordinary 400s no
+  longer get misread as `context_length`.)
+- Some catalog entries could not be checked against provider pages yet: DeepSeek's
+  pricing (now V4 models with peak and off-peak rates), the Hyperbolic and Fireworks image
+  endpoints, and Google's free-tier quotas.
+- No Anthropic-protocol endpoint (`/v1/messages`), so Claude Code and other
+  `ANTHROPIC_BASE_URL` clients cannot use the gateway.
 - A half-open breaker trial that gets a 429 never reports back, so the trial slot stays
   held until its window expires.
+- The Claude 5.5 models are not in the catalog yet: they reject sampling parameters and
+  forced tool choice that the Anthropic adapter passes through. Claude Sonnet 4.5 retires on
+  2026-11-30 and will fail from then until it is removed from the catalog.
+- Paid transcription logs $0. Whisper is billed per audio minute, which the per-token
+  catalog cannot price, so OpenAI transcription does not count toward spend or budgets.
+  Cost ceilings, including `free-only`, refuse it rather than guess.
 
 **Do not run it exposed to the internet** without a reverse proxy and authentication in
 front. It is built for a machine you control. See [SECURITY.md](SECURITY.md) for the threat

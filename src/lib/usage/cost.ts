@@ -36,7 +36,9 @@ export function computeCost(model: CatalogModel | null, usage: TokenUsage | null
   // Cached tokens are already counted inside promptTokens by every provider
   // that reports them, so they must be subtracted before billing at full rate.
   const billedPrompt = Math.max(0, usage.promptTokens - usage.cachedTokens);
-  const billedOutput = usage.completionTokens + usage.reasoningTokens;
+  // Reasoning is already inside completionTokens (see TokenUsage); adding it
+  // again billed every thinking token twice.
+  const billedOutput = usage.completionTokens;
 
   const inputCost =
     (billedPrompt * model.inputCostPerMTok + usage.cachedTokens * model.inputCostPerMTok * CACHE_DISCOUNT) /
@@ -69,7 +71,7 @@ export function settleRequest(
 
   const costUsd = isCoveredByFreeTier(provider, model) ? 0 : computeCost(model, usage);
 
-  const billedOutput = usage.completionTokens + usage.reasoningTokens;
+  const billedOutput = usage.completionTokens;
   const baseline =
     (usage.promptTokens * BASELINE_INPUT_PER_MTOK + billedOutput * BASELINE_OUTPUT_PER_MTOK) /
     PER_MTOK;

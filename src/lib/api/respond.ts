@@ -1,36 +1,15 @@
 import type { ApiKey } from '@/types/core';
 import { listApiKeys, touchApiKey, verifyApiKey } from '@/lib/db/repos/apiKeys';
+import { getComboBySlug } from '@/lib/db/repos/combos';
 import { checkRateLimit } from '@/lib/auth/rateLimit';
+import { allowedOrigins, gatewayOriginAllowed, hostAllowed, mayRunOpen } from '@/lib/auth/access';
+import { clientAddress } from '@/lib/auth/session';
 
 const CORS_BASE: Record<string, string> = {
   'access-control-allow-headers': 'authorization, content-type, x-api-key, openai-organization',
   'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
   'access-control-max-age': '86400',
 };
-
-/**
- * Origins allowed to call `/v1` from a browser.
- *
- * `*` was the old default and it was the wrong one. The gateway holds every
- * provider credential the user owns, and a wildcard means any page in that
- * browser can spend them the moment it learns a key — the same-origin policy
- * being the only thing that would otherwise have stopped it.
- *
- * The endpoint is designed for server-side SDK clients, which do not send an
- * `Origin` header and are unaffected by CORS at all. So the default is now no
- * CORS, and a browser app opts in explicitly:
- *
- *     SWITCHBOARD_CORS_ORIGINS=http://localhost:3000,https://myapp.example
- *     SWITCHBOARD_CORS_ORIGINS=*        (the old behaviour, if you want it)
- */
-function allowedOrigins(): string[] {
-  const raw = process.env.SWITCHBOARD_CORS_ORIGINS?.trim();
-  if (raw === undefined || raw.length === 0) return [];
-  return raw
-    .split(',')
-    .map((origin) => origin.trim().replace(/\/$/, ''))
-    .filter((origin) => origin.length > 0);
-}
 
 /**
  * Reflects the caller's origin when it is allowed, rather than echoing `*`.
@@ -111,16 +90,59 @@ function bearer(req: Request): string | null {
 /**
  * Authenticates a gateway request.
  *
- * When no API key has been created yet the gateway runs open. A fresh local
- * install has to be usable the moment it boots — requiring a key before the
- * first request would mean the user cannot test anything until they have
- * visited the dashboard, which defeats the point of a local tool.
+ * When no API key has been created yet the gateway runs open, for this
+ * machine only. A fresh local install has to be usable the moment it boots;
+ * requiring a key before the first request would mean the user cannot test
+ * anything until they have visited the dashboard, which defeats the point of a
+ * local tool. That reasoning covers a shell on this machine, not every device
+ * on the network, so a remote caller needs a key unless the operator has set
+ * SWITCHBOARD_ALLOW_REMOTE to say their own front door handles it.
  */
 export function authenticate(req: Request): AuthResult {
+  if (!hostAllowed(req)) {
+    return {
+      key: null,
+      error: jsonError(
+        403,
+        'This Host is not one Switchboard answers to. Use localhost or an IP address, or list ' +
+          'the name in SWITCHBOARD_ALLOWED_HOSTS.',
+        'permission_error',
+        'host_not_allowed',
+      ),
+    };
+  }
+
+  if (!gatewayOriginAllowed(req)) {
+    return {
+      key: null,
+      error: jsonError(
+        403,
+        'Browser requests from this origin are not allowed. Add it to SWITCHBOARD_CORS_ORIGINS ' +
+          'to permit it.',
+        'permission_error',
+        'origin_not_allowed',
+      ),
+    };
+  }
+
   const secret = bearer(req);
   const configured = listApiKeys();
 
-  if (configured.length === 0) return { key: null, error: null };
+  if (configured.length === 0) {
+    if (mayRunOpen(req)) return { key: null, error: null };
+    return {
+      key: null,
+      error: jsonError(
+        401,
+        'No API key exists yet, so the gateway only answers this machine. Create one with ' +
+          '`sb keys new <name>` and send it as "Authorization: Bearer sb-live-...".',
+        'authentication_error',
+        'missing_api_key',
+        {},
+        req,
+      ),
+    };
+  }
 
   if (secret === null) {
     return {
@@ -163,10 +185,51 @@ export function authenticate(req: Request): AuthResult {
   return { key, error: null };
 }
 
+/**
+ * A key limited to named policies may only ask for those policies.
+ *
+ * The dashboard has offered "Allowed policies" since the first release and
+ * stored it on every key, but nothing ever read it, so a key restricted to
+ * `free-only` could still request `quality` or name a paid model directly.
+ * The rule is exact: anything other than an allowed slug (a bare model id, a
+ * provider pin, another policy) is refused, because each of those would
+ * route around the restriction.
+ */
+export function policyDenied(key: ApiKey | null, requestedModel: string, req?: Request): Response | null {
+  if (key === null || key.allowedCombos.length === 0) return null;
+  if (!key.allowedCombos.includes(requestedModel)) {
+    return jsonError(
+      403,
+      `This API key may only use: ${key.allowedCombos.join(', ')}. "${requestedModel}" is not one of them.`,
+      'permission_error',
+      'model_not_allowed',
+      {},
+      req,
+    );
+  }
+
+  // The slug has to still name an enabled policy. Once a policy is disabled,
+  // deleted or renamed, its old slug no longer matches anything and the router
+  // treats it as an unknown model, served by the default policy with no cost
+  // ceiling. That turned a key restricted to free-only into an unrestricted
+  // one with a single click in the dashboard.
+  const combo = getComboBySlug(requestedModel);
+  if (combo === null || !combo.enabled) {
+    return jsonError(
+      403,
+      `The policy "${requestedModel}" this key is limited to is disabled or no longer exists. ` +
+        'Re-enable it, or edit the key to allow another policy.',
+      'permission_error',
+      'policy_unavailable',
+      {},
+      req,
+    );
+  }
+  return null;
+}
+
 export function clientMeta(req: Request): { ip: string | null; userAgent: string | null } {
-  const forwarded = req.headers.get('x-forwarded-for');
-  const ip = forwarded === null ? null : (forwarded.split(',')[0]?.trim() ?? null);
-  return { ip, userAgent: req.headers.get('user-agent') };
+  return { ip: clientAddress(req), userAgent: req.headers.get('user-agent') };
 }
 
 /** Maps a normalized adapter failure onto the HTTP status a client expects. */
@@ -183,6 +246,10 @@ export function statusForErrorKind(kind: string): number {
       return 400;
     case 'unsupported':
       return 404;
+    case 'unavailable':
+      // 503, not 404: the model exists and will be served once a breaker
+      // closes or a lockout lapses, and SDKs retry a 503 on their own.
+      return 503;
     case 'timeout':
       return 504;
     default:

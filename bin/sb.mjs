@@ -6,12 +6,11 @@ import { createInterface } from 'node:readline';
 import { existsSync, accessSync, constants, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 import net from 'node:net';
 import pc from 'picocolors';
 import { api, baseUrl } from './lib/client.mjs';
 import { banner, dot, fail, info, money, ms, ok, table, warn } from './lib/render.mjs';
-import { resolveDataDir } from './lib/dataDir.mjs';
+import { appDataDir, isInsidePackage, resolveDataDir } from './lib/dataDir.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -21,26 +20,6 @@ function readPackageVersion() {
     return String(JSON.parse(raw).version ?? '0.0.0');
   } catch {
     return '0.0.0';
-  }
-}
-
-/**
- * Locate Next's CLI entry through node's own resolver.
- *
- * Hardcoding `<root>/node_modules/next` only works for a repo checkout. On a
- * global install npm hoists dependencies, so next can sit anywhere up the tree
- * — resolving it is the difference between `npm i -g switchboard-gateway` working and
- * failing with ENOENT on a path the user cannot see.
- */
-function resolveNextBin() {
-  try {
-    return createRequire(import.meta.url).resolve('next/dist/bin/next');
-  } catch {
-    const local = join(root, 'node_modules', 'next', 'dist', 'bin', 'next');
-    if (existsSync(local)) return local;
-    console.error(pc.red('Could not find the Next.js runtime.'));
-    console.error(pc.dim('  Reinstall Switchboard:  npm install -g switchboard-gateway'));
-    process.exit(1);
   }
 }
 
@@ -62,17 +41,23 @@ program
 // ── start ────────────────────────────────────────────────────────────────────
 
 program
-  .command('start')
+  .command('start', { isDefault: true })
   .description('start the gateway and dashboard')
-  .option('-p, --port <port>', 'port to listen on', '7272')
+  .option('-p, --port <port>', 'port to listen on', process.env.PORT ?? '7272')
+  .option(
+    '-H, --host <host>',
+    'interface to listen on (0.0.0.0 exposes it to your network)',
+    process.env.SWITCHBOARD_HOST ?? '127.0.0.1',
+  )
   .option('--open', 'open the dashboard once it is ready')
   .action(async (options) => {
     const port = Number(options.port);
+    const host = String(options.host);
 
     if (!existsSync(join(root, '.next'))) {
       fail('No production build found.');
       info('From a repo checkout, run:  npm run build');
-      info('If you installed globally, reinstall:  npm install -g switchboard-gateway');
+      info('Then run `npm install -g .` again from that folder.');
       process.exit(1);
     }
 
@@ -80,20 +65,63 @@ program
     // the next `npm update -g` would delete it along with every stored key.
     const dataDir = resolveDataDir(root);
 
-    banner(port, dataDir);
+    // Where this machine reaches the server: loopback when it listens on every
+    // interface, otherwise the one address it was told to bind.
+    const reachAt = connectHost(host);
+    banner(port, dataDir, host, reachAt);
 
-    const child = spawn(process.execPath, [resolveNextBin(), 'start', '-p', String(port)], {
+    if (isInsidePackage(root, dataDir)) {
+      warn(`Your database and master key are inside ${root}.`);
+      info('Deleting or reinstalling that folder deletes every stored provider key.');
+      info(`Move ${dataDir} to ${appDataDir()} (or set SWITCHBOARD_DATA_DIR) to keep them safe.`);
+      console.log('');
+    }
+
+    // server.mjs rather than `next start`: it binds the interface given here
+    // (loopback unless told otherwise) and reads the caller's real address off
+    // the socket, which `next start` cannot give the app.
+    const child = spawn(process.execPath, [join(root, 'server.mjs')], {
       cwd: root,
-      env: { ...process.env, PORT: String(port), SWITCHBOARD_DATA_DIR: dataDir },
+      env: { ...process.env, PORT: String(port), SWITCHBOARD_HOST: host, SWITCHBOARD_DATA_DIR: dataDir },
       stdio: 'inherit',
     });
 
-    if (options.open === true) {
-      await waitForPort(port);
-      openBrowser(`http://127.0.0.1:${port}/dashboard`);
-    }
+    let exited = false;
+    child.on('exit', (code) => {
+      exited = true;
+      process.exit(code ?? 0);
+    });
+    // Ctrl+C reaches the server too, and it shuts down by draining requests.
+    // Exiting here first would hand the terminal back while it is still going.
+    process.on('SIGINT', () => {});
+    process.on('SIGTERM', () => child.kill('SIGTERM'));
 
-    child.on('exit', (code) => process.exit(code ?? 0));
+    if (options.open === true) {
+      // A server that fails to start (port taken, bad host) exits at once; do
+      // not sit out the full timeout pretending it might still come up.
+      const ready = await waitForPort(port, reachAt, () => exited).then(
+        () => true,
+        () => false,
+      );
+      if (ready) openBrowser(`http://${urlHost(reachAt)}:${port}/dashboard`);
+    }
+  });
+
+// ── token ────────────────────────────────────────────────────────────────────
+
+program
+  .command('token')
+  .description('print the dashboard token for remote browsers (--rotate to reset it)')
+  .option('--rotate', 'issue a new token and invalidate the old one')
+  .action(async (options) => {
+    const { token } = await api('/api/system/token', { method: options.rotate === true ? 'POST' : 'GET' });
+    console.log('');
+    if (options.rotate === true) ok('Token rotated. Browsers holding the old one are signed out.');
+    console.log(`  ${pc.bold(pc.yellow(token))}`);
+    console.log('');
+    info('Open /dashboard?token=<token> once from the remote browser, or send it in the');
+    info('x-switchboard-token header. Reading it only works from this machine.');
+    console.log('');
   });
 
 // ── status ───────────────────────────────────────────────────────────────────
@@ -292,7 +320,13 @@ program
   .command('chat')
   .description('streaming chat REPL against the gateway')
   .option('-m, --model <model>', 'model or policy slug', 'auto')
+  // Once any API key exists the gateway requires one, and chat sent none, so it
+  // stopped working the moment the quickstart's `sb keys new` had run.
+  .option('-k, --key <key>', 'API key (sb-live-...), or set SWITCHBOARD_API_KEY')
   .action(async (options) => {
+    // Read here, not as the option default: commander prints defaults in
+    // --help, which would put the secret on screen.
+    const apiKey = options.key ?? process.env.SWITCHBOARD_API_KEY;
     console.log('');
     console.log(`  ${pc.bold('Switchboard chat')} ${pc.dim(`· model ${options.model} · Ctrl+C to exit`)}`);
     console.log('');
@@ -307,13 +341,19 @@ program
 
         const response = await fetch(`${baseUrl()}/v1/chat/completions`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+          },
           body: JSON.stringify({ model: options.model, messages: history, stream: true }),
         });
 
         if (!response.ok || response.body === null) {
           const body = await response.text();
           console.log(pc.red(`  ${body}`));
+          if (response.status === 401) {
+            info('Pass a key with  sb chat --key sb-live-...  or set SWITCHBOARD_API_KEY.');
+          }
           console.log('');
           return ask();
         }
@@ -465,6 +505,9 @@ program
     } catch {
       fail(`Data directory not writable — ${status.dataDir}`);
     }
+    if (isInsidePackage(root, status.dataDir)) {
+      warn(`Data directory is inside the install at ${root}; deleting it deletes your keys`);
+    }
 
     if (existsSync(join(root, '.next'))) ok('Production build present');
     else warn('No .next build — run `npm run build` before `sb start`');
@@ -508,11 +551,21 @@ function openBrowser(url) {
   spawn(command, args, { detached: true, stdio: 'ignore' }).unref();
 }
 
-function waitForPort(port, timeoutMs = 60_000) {
+function connectHost(host) {
+  const value = String(host).trim();
+  return value === '' || value === '0.0.0.0' || value === '::' ? '127.0.0.1' : value;
+}
+
+function urlHost(host) {
+  return host.includes(':') ? `[${host}]` : host;
+}
+
+function waitForPort(port, host = '127.0.0.1', gaveUp = () => false, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const attempt = () => {
-      const socket = net.connect(port, '127.0.0.1');
+      if (gaveUp()) return reject(new Error('server exited'));
+      const socket = net.connect(port, host);
       socket.once('connect', () => {
         socket.destroy();
         resolve();

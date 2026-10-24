@@ -76,6 +76,11 @@ function image(
   };
 }
 
+/**
+ * Transcription is billed per audio minute. Left at a bare $0 per token,
+ * OpenAI's paid Whisper ranked as free and the free-only policy, which
+ * promises never to spend money, routed to it.
+ */
 function transcription(id: string, name: string): CatalogModel {
   return {
     id,
@@ -87,6 +92,7 @@ function transcription(id: string, name: string): CatalogModel {
     inputCostPerMTok: 0,
     outputCostPerMTok: 0,
     throughputPrior: 0,
+    unpriced: true,
   };
 }
 
@@ -95,14 +101,16 @@ function freeTier(
   requestsPerDay: number | null,
   tokensPerMinute: number | null,
   noCardRequired: boolean,
+  options: { zeroPricedOnly?: boolean } = {},
 ): FreeTier {
-  return { summary, requestsPerDay, tokensPerMinute, noCardRequired };
+  return { summary, requestsPerDay, tokensPerMinute, noCardRequired, ...options };
 }
 
 const TOOLS: ChatFeature[] = ['tools', 'json_mode'];
 const TOOLS_VISION: ChatFeature[] = ['tools', 'json_mode', 'vision'];
 const TOOLS_REASONING: ChatFeature[] = ['tools', 'json_mode', 'reasoning'];
 const FULL: ChatFeature[] = ['tools', 'json_mode', 'vision', 'reasoning'];
+const ANTHROPIC: ChatFeature[] = ['tools', 'vision', 'reasoning'];
 
 export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
   // ─── Free-first tier ───────────────────────────────────────────────────────
@@ -174,9 +182,9 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       chat('gemini-2.5-pro', 'Gemini 2.5 Pro', 1_048_576, 65_536, 1.25, 10.0, 90, FULL),
       chat('gemini-2.5-flash', 'Gemini 2.5 Flash', 1_048_576, 65_536, 0.3, 2.5, 180, FULL),
       chat('gemini-2.5-flash-lite', 'Gemini 2.5 Flash Lite', 1_048_576, 65_536, 0.1, 0.4, 400, TOOLS_VISION),
-      chat('gemini-2.0-flash', 'Gemini 2.0 Flash', 1_048_576, 8_192, 0.1, 0.4, 250, TOOLS_VISION),
-      chat('gemini-2.0-flash-lite', 'Gemini 2.0 Flash Lite', 1_048_576, 8_192, 0.075, 0.3, 350, TOOLS_VISION),
-      embedding('text-embedding-004', 'Text Embedding 004', 2_048, 0),
+      // gemini-2.0-flash and -flash-lite were shut down on 2026-06-01 and
+      // text-embedding-004 on 2026-01-14 (Gemini API release notes). Listed,
+      // they ranked near the top of the free ladder and 404'd on every call.
       embedding('gemini-embedding-001', 'Gemini Embedding 001', 2_048, 0.15),
       image('imagen-4.0-generate-001', 'Imagen 4', 0, 40),
     ],
@@ -189,12 +197,15 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     authScheme: 'bearer',
     modelsPath: '/models',
     extraHeaders: {
-      'HTTP-Referer': 'https://github.com/switchboard-gateway/switchboard',
+      'HTTP-Referer': 'https://github.com/abeermeer/switchboard',
       'X-Title': 'Switchboard',
     },
     docsUrl: 'https://openrouter.ai/docs/quickstart',
     signupUrl: 'https://openrouter.ai/settings/keys',
-    freeTier: freeTier('50 req/day on :free models (1,000/day after $10 top-up)', 50, null, true),
+    // Only the `:free` variants are free; the rest bill the account's credits.
+    freeTier: freeTier('50 req/day on :free models (1,000/day after $10 top-up)', 50, null, true, {
+      zeroPricedOnly: true,
+    }),
     modalities: ['chat'],
     accent: '#6467F2',
     requiresKey: true,
@@ -455,7 +466,7 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     docsUrl: 'https://platform.openai.com/docs/api-reference/chat',
     signupUrl: 'https://platform.openai.com/api-keys',
     freeTier: null,
-    modalities: ['chat', 'embeddings', 'images', 'audio.transcription'],
+    modalities: ['chat', 'embeddings', 'images', 'audio.transcription', 'moderation'],
     accent: '#10A37F',
     requiresKey: true,
     blurb: 'The reference implementation. Everything else in this list imitates its wire format.',
@@ -471,6 +482,21 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
       embedding('text-embedding-3-large', 'Text Embedding 3 Large', 8_191, 0.13),
       image('gpt-image-1', 'GPT Image 1', 5.0, 40.0),
       transcription('whisper-1', 'Whisper v2'),
+      {
+        // OpenAI's moderation endpoint is free of charge. Without a catalog entry
+        // /v1/moderations was advertised but answered 404 with every provider
+        // connected. OpenAI publishes no token window for it; 32K is a bound,
+        // not a quote, and a longer input is rejected upstream either way.
+        id: 'omni-moderation-latest',
+        name: 'Omni Moderation',
+        modality: 'moderation',
+        features: [],
+        contextWindow: 32_768,
+        maxOutput: 0,
+        inputCostPerMTok: 0,
+        outputCostPerMTok: 0,
+        throughputPrior: 0,
+      },
     ],
   },
   {
@@ -489,13 +515,25 @@ export const PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     accent: '#D97757',
     requiresKey: true,
     blurb: 'Claude. Long-horizon agentic work, prompt caching, and assistant prefill.',
+    // Prices, windows and retirement dates from platform.claude.com (pricing,
+    // model deprecations), read 2026-10-18. Claude 3.7 Sonnet
+    // and 3.5 Haiku retired 2026-02-19 and Opus 4.1 on 2026-08-05; they are gone
+    // rather than left to 404. Sonnet 4.5 is deprecated and retires 2026-11-30.
+    //
+    // No json_mode: the Anthropic adapter does not translate response_format,
+    // so a JSON-mode request routed here had the setting silently dropped.
+    //
+    // The 5.5 generation is not listed yet. Opus 5.5 rejects temperature, top_p
+    // and top_k, Sonnet 5.5 rejects non-default values, and both reject a
+    // forced tool_choice. The adapter passes all of those through from OpenAI
+    // requests, so ordinary calls failed, and each failure counted against the
+    // whole Anthropic connection's breaker. Add them with adapter support for
+    // those limits. Haiku 5.5 additionally steps up its price past 100K-token
+    // prompts, which a single per-MTok figure cannot represent.
     models: [
-      chat('claude-opus-4-5-20251101', 'Claude Opus 4.5', 200_000, 64_000, 5.0, 25.0, 60, [...FULL, 'prefill']),
-      chat('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', 200_000, 64_000, 3.0, 15.0, 75, [...FULL, 'prefill']),
-      chat('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 200_000, 64_000, 1.0, 5.0, 140, [...FULL, 'prefill']),
-      chat('claude-opus-4-1-20250805', 'Claude Opus 4.1', 200_000, 32_000, 15.0, 75.0, 40, [...FULL, 'prefill']),
-      chat('claude-3-7-sonnet-20250219', 'Claude 3.7 Sonnet', 200_000, 64_000, 3.0, 15.0, 70, [...FULL, 'prefill']),
-      chat('claude-3-5-haiku-20241022', 'Claude 3.5 Haiku', 200_000, 8_192, 0.8, 4.0, 160, [...TOOLS_VISION, 'prefill']),
+      chat('claude-opus-4-5-20251101', 'Claude Opus 4.5', 200_000, 64_000, 5.0, 25.0, 60, [...ANTHROPIC, 'prefill']),
+      chat('claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', 200_000, 64_000, 3.0, 15.0, 75, [...ANTHROPIC, 'prefill']),
+      chat('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', 200_000, 64_000, 1.0, 5.0, 140, [...ANTHROPIC, 'prefill']),
     ],
   },
   {

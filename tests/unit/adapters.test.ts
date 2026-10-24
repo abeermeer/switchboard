@@ -199,24 +199,48 @@ describe('normalizeUsage', () => {
     );
   });
 
-  it('reads the Gemini spelling including thoughts and cached content', () => {
+  it('reads the Gemini spelling and folds thoughts into completion', () => {
+    // candidatesTokenCount excludes thinking and Google bills both at the
+    // output rate, so completionTokens has to carry the sum.
     expect(
       normalizeUsage({
         promptTokenCount: 3,
         candidatesTokenCount: 4,
-        totalTokenCount: 7,
+        totalTokenCount: 8,
         cachedContentTokenCount: 2,
         thoughtsTokenCount: 1,
       }),
     ).toEqual(
       usage({
         promptTokens: 3,
-        completionTokens: 4,
-        totalTokens: 7,
+        completionTokens: 5,
+        totalTokens: 8,
         cachedTokens: 2,
         reasoningTokens: 1,
       }),
     );
+  });
+
+  it('leaves an OpenAI completion count alone: reasoning is already inside it', () => {
+    expect(
+      normalizeUsage({
+        prompt_tokens: 10,
+        completion_tokens: 50,
+        total_tokens: 60,
+        completion_tokens_details: { reasoning_tokens: 40 },
+      }),
+    ).toEqual(usage({ promptTokens: 10, completionTokens: 50, totalTokens: 60, reasoningTokens: 40 }));
+  });
+
+  it('folds reasoning in when the total shows it was reported beside completion', () => {
+    expect(
+      normalizeUsage({
+        prompt_tokens: 10,
+        completion_tokens: 10,
+        total_tokens: 60,
+        completion_tokens_details: { reasoning_tokens: 40 },
+      }),
+    ).toEqual(usage({ promptTokens: 10, completionTokens: 50, totalTokens: 60, reasoningTokens: 40 }));
   });
 
   it('reads Cohere counts nested under tokens', () => {
@@ -573,6 +597,34 @@ describe('classifyHttpError', () => {
   it('classifies a 400 mentioning tokens/too long as context_length', () => {
     expect(classifyHttpError(400, 'input is too long', noHeaders()).kind).toBe('context_length');
     expect(classifyHttpError(400, 'too many tokens', noHeaders()).kind).toBe('context_length');
+  });
+
+  it.each([
+    'This model\'s maximum context length is 8192 tokens',
+    'Please reduce the length of the messages or completion.',
+    'The input token count (1200000) exceeds the maximum number of tokens allowed (1048576).',
+    'Prompt contains 40000 tokens, too large for model with 32768 maximum context length',
+    'context_length_exceeded',
+    // Output caps: another model with a larger one can still serve these.
+    'max_tokens: 100000 > 64000, which is the maximum allowed number of output tokens for claude-haiku-4-5-20251001',
+    'max_tokens must be less than or equal to 8192',
+    'inputs tokens + max_new_tokens must be <= 8193',
+  ])('recognises the provider phrasing "%s" as context_length', (message) => {
+    expect(classifyHttpError(400, JSON.stringify({ error: { message } }), noHeaders()).kind).toBe(
+      'context_length',
+    );
+  });
+
+  it.each([
+    'max_tokens must be a positive integer',
+    'maximum value for temperature is 2',
+    'Invalid token in JSON at position 5',
+  ])('does not mistake "%s" for an over-long prompt', (message) => {
+    // These used to match, so a malformed request was retried on every
+    // provider and counted against each breaker.
+    expect(classifyHttpError(400, JSON.stringify({ error: { message } }), noHeaders()).kind).toBe(
+      'bad_request',
+    );
   });
 
   it('classifies a generic malformed 400 as bad_request', () => {

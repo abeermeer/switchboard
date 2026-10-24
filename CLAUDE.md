@@ -16,15 +16,15 @@ architecture from there.
 ## Commands
 
 ```bash
-npm run dev          # dev server on :7272
+npm run dev          # dev server on 127.0.0.1:7272
 npm run typecheck    # tsc --noEmit — must be clean before any commit
-npm run test:run     # vitest, ~1,035 tests, must be green before any commit
+npm run test:run     # vitest, ~1,134 tests, must be green before any commit
 npm run build        # production build; CI runs this on 4 platform/version combos
-npm start            # serve the production build
+npm start            # serve the production build through server.mjs
 npm run icons            # regenerate the desktop icons from the product mark
 npm run verify:electron  # structural check on the desktop packaging; runs in CI
 npm run verify:name      # the npm name still resolves to this repository
-npm run verify:install   # pack, install to a temp global prefix, run the command
+npm run verify:install   # pack, install to a temp global prefix, boot the command
 node bin/sb.mjs doctor   # diagnose a local install
 ```
 
@@ -35,11 +35,19 @@ place to land. Do not lower this floor without checking that flag history again.
 
 ## Architecture in one paragraph
 
-A request enters at `src/app/v1/*`, goes through the shared pipeline in
+`server.mjs` is the production entry (CLI, desktop, Docker, `npm start`): it binds
+`127.0.0.1` unless `SWITCHBOARD_HOST` says otherwise and stamps each request with a
+local/remote verdict read off the socket. `src/proxy.ts` gates every page and API route on
+it. A request enters at `src/app/v1/*`, goes through the shared pipeline in
 `src/lib/api/handler.ts` (parse → validate → authenticate → route → respond → log), and the
 routing itself is three steps in `src/lib/router/`: `candidates.ts` expands the client's
 `model` string into every connection+model pair that could serve it, `score.ts` ranks them
 on eight weighted factors, and `execute.ts` walks the ranked list until one succeeds.
+`src/instrumentation.ts` runs once at boot: it seeds the four starter policies and starts
+the health loop (probes, log retention, lockout and latency sweeps). Nothing else starts
+that loop; before this file existed it never ran in a real install. Next's config is
+`next.config.mjs`, not `.ts`: a TypeScript config needs Next's native SWC binary at every
+start, which a build packaged for another architecture lacks.
 Everything persists through `src/lib/db/repos/`.
 
 Full detail: [docs/architecture.md](docs/architecture.md).
@@ -57,6 +65,18 @@ These are load-bearing. Breaking one produces a bug that typechecks.
 - **Never import a server module from a `'use client'` component.** Anything touching
   `node:sqlite`, `node:crypto`, or `node:fs` is server-only. This fails at build, not at
   typecheck.
+- **Production runs through `server.mjs`, never bare `next start`.** Who counts as local
+  comes from its socket verdict (`x-switchboard-client`, trusted only when
+  `SWITCHBOARD_SERVER=1`, which only that process sets). Without it the app falls back to
+  `X-Forwarded-For`, which is safe only for `next dev` and tests, bound to loopback.
+- **Every management handler calls `guard()`**, even though `src/proxy.ts` runs the same
+  gate first. A handler reachable without the proxy must not be an open door.
+- **`next`, `react` and `react-dom` are pinned exactly.** The package ships a prebuilt
+  `.next`, and a global install ignores the lockfile; a caret range pulled a newer Next that
+  could not read the build. Bump them together with a rebuild.
+- **`TokenUsage.completionTokens` includes reasoning tokens.** Adapters fold separately
+  reported thinking into it at normalization; cost code must never add `reasoningTokens` on
+  top.
 - **Route handlers that touch the DB** need `export const runtime = 'nodejs'` and
   `export const dynamic = 'force-dynamic'`.
 - **Next 16 route params are async**: `{ params }: { params: Promise<{ id: string }> }`.
@@ -85,8 +105,22 @@ so `text-${tone}` never reaches the stylesheet — write the branches out.
 
 Do not "fix" these:
 
-- **The gateway runs unauthenticated until the first API key exists.** A fresh install has
-  to be usable before the user has opened the dashboard.
+- **The gateway runs unauthenticated until the first API key exists, for local callers
+  only.** A fresh install has to be usable before the user has opened the dashboard. Remote
+  callers need a key regardless, unless `SWITCHBOARD_ALLOW_REMOTE` is set.
+- **A request carrying a forwarding header counts as remote**, even from 127.0.0.1
+  (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`). A reverse proxy on the same machine would
+  otherwise make the whole internet look like localhost. `server.mjs` also requires the
+  Host to name this machine. That still leaves one hole no code can close: a proxy that
+  sends no forwarding header and a loopback Host, which is nginx's default `proxy_pass`.
+  The docs tell users to add the header; do not claim "any proxy" is detected.
+- **Only IP literals, `localhost` and `SWITCHBOARD_ALLOWED_HOSTS` are answered**, and
+  writes from another origin are refused. That is the DNS rebinding and CSRF defence for a
+  loopback-bound server; both attacks arrive from 127.0.0.1.
+- **The default policy applies only to requests that named nothing recognisable.** A policy
+  slug, a `provider/model` pin or a catalog model id bypasses it. An unrecognised model
+  still routes as "auto" (tools with hard-coded model names rely on it) but gets an
+  `x-switchboard-substituted` header.
 - **`bad_request` (400) does not trigger a fallback.** A malformed body produces the same
   400 on every provider; retrying five times makes the client wait five times as long for
   the same answer.
@@ -98,6 +132,18 @@ Do not "fix" these:
   both misrank the free-first ladder and overstate the user's spend.
 - **An empty combo member chain means "consider every eligible connection."** It is the
   default and usually correct, not an unconfigured state.
+- **A key restricted to a policy that no longer exists, or is disabled, gets 403
+  `policy_unavailable`** rather than the default policy. Falling through would route the
+  stale slug as an unknown model, with no cost ceiling, which turned a `free-only` key into
+  an unrestricted one.
+- **OpenRouter's free tier is `zeroPricedOnly`.** It covers only the `:free` variants; its
+  paid models are cheap enough to pass the $1/MTok free-tier heuristic, which made
+  `free-only` spend money while logging $0.
+- **Transcription models are `unpriced`.** Whisper is billed per audio minute, so its $0
+  token prices are a missing price. It counts as free only inside a provider's free tier
+  (Groq), and every cost ceiling refuses it elsewhere (OpenAI). The token-window check
+  skips audio too: the optional text prompt used to fill a 448-token window and refuse the
+  request.
 - **The npm package is `switchboard-gateway`, not `switchboard`.** The short name belongs to
   an unrelated 2022 library with no `bin`, so `npm install -g switchboard` installs that and
   leaves the user with no command — which is exactly what happened. The *commands* are still
@@ -139,7 +185,7 @@ npm run test:run     # once
 npm run test:ci      # with coverage
 ```
 
-~1,035 tests in `tests/`, on vitest. Structure:
+~1,134 tests in `tests/`, on vitest. Structure:
 
 - `tests/setup.ts` repoints `SWITCHBOARD_DATA_DIR` at a temp directory **before any module
   is imported**. This is load-bearing: the master key and the DB handle cache in module
@@ -147,6 +193,10 @@ npm run test:ci      # with coverage
   developer's real key.
 - `tests/helpers/db.ts` — `freshDb()` per test, `dropDb()` after. Any suite that writes
   rows must use them; tests must not depend on ordering.
+- A fresh test database has **no routing policies**, but every real install seeds `auto`
+  (the default), `free-only`, `fast` and `quality` on first load. Routing tests that should
+  hold on a real install call `ensureSeedCombos()`. Provider pinning was broken for every
+  user while the suite passed, because it never did.
 - `tests/helpers/upstream.ts` — stubs global `fetch`, which is where every adapter reaches
   the network. The plan array is consumed one entry per upstream call, so
   `[providerError(429), chatOk()]` describes a fallback. **Nothing in the suite may reach a
@@ -223,11 +273,24 @@ Be honest about these rather than papering over them:
   DB repositories and most dashboard pages have none, and there are no end-to-end tests.
 - **`context_length` counts toward the breaker threshold**, unlike `bad_request`. A client
   looping oversized prompts can open the breaker on a healthy connection.
+- **Some catalog entries are unverified against provider pages**: DeepSeek's pricing (V4
+  models with peak and off-peak rates since 2026-08), the Hyperbolic and Fireworks image
+  endpoints (possibly not OpenAI-compatible), and Google's free-tier quotas. Their pages
+  could not be read from the session that found this.
+- **No `/v1/messages`.** Anthropic-protocol clients (Claude Code via `ANTHROPIC_BASE_URL`)
+  cannot use the gateway.
 - **A half-open trial that gets a 429 never reports back** — the trial slot stays held
   until its window expires.
 - **No audit log of admin actions** — key creation, connection changes and token rotation
   are not recorded anywhere.
-- **No graceful shutdown** — SIGTERM kills in-flight streams rather than draining them.
+- **Shutdown drains for 10 seconds only.** SIGTERM stops new connections and gives
+  in-flight requests 10 s; a longer stream is cut.
+- **The Claude 5.5 models are not in the catalog.** They reject the sampling parameters
+  and forced `tool_choice` the Anthropic adapter passes through; they need adapter support
+  first. Claude Sonnet 4.5 retires 2026-11-30 and must be removed from the catalog then.
+- **Paid transcription logs $0.** Spend and budgets cannot see per-minute billing.
+- **A same-machine proxy with no forwarding header looks local.** See the deliberate list
+  above; documented, not fixable in code.
 
 [SESSION_SUMMARY.md](SESSION_SUMMARY.md) records what changed in each session and why.
 Roadmap for the gaps lives in the audit documents the user maintains outside the repo.

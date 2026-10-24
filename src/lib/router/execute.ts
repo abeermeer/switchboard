@@ -8,7 +8,8 @@ import type {
 import { getConnection } from '@/lib/db/repos/connections';
 import { getCredential } from '@/lib/db/repos/credentials';
 import { getAdapter, getProvider } from '@/lib/providers/registry';
-import { onFailure, onSuccess } from '@/lib/resilience/breaker';
+import { isAvailable, onFailure, onSuccess } from '@/lib/resilience/breaker';
+import { BREAKER_OPEN, MODEL_LOCKED_OUT } from './candidates';
 
 export interface ExecuteInput {
   candidates: RouteCandidate[];
@@ -40,24 +41,45 @@ export async function executeRoute(input: ExecuteInput): Promise<ExecuteOutput> 
   const attempts: RouteAttempt[] = [];
 
   if (eligible.length === 0) {
+    const transient = input.candidates.some(
+      (c) => c.excludedReason === BREAKER_OPEN || c.excludedReason === MODEL_LOCKED_OUT,
+    );
     return {
       response: null,
       attempts,
       winningAttempt: null,
-      error: {
-        kind: 'unsupported',
-        message: 'No provider is available to serve this request.',
-        retryAfterSec: null,
-        raw: null,
-      },
+      error: transient
+        ? temporarilyUnavailable()
+        : {
+            kind: 'unsupported',
+            message: 'No provider is available to serve this request.',
+            retryAfterSec: null,
+            raw: null,
+          },
     };
   }
 
-  const limit = Math.min(input.maxAttempts, eligible.length);
   let lastError: AdapterError | null = null;
+  // Requests actually sent. maxAttempts caps these, not candidates looked at:
+  // once a connection's half-open trial fails, its other models are skipped
+  // below, and if each skip spent an attempt the walk ran out before reaching
+  // a healthy provider further down the ranking.
+  let sent = 0;
 
-  for (let i = 0; i < limit; i += 1) {
+  for (let i = 0; i < eligible.length; i += 1) {
+    if (sent >= input.maxAttempts) break;
+    // Nobody is waiting for an answer, so do not buy one.
+    if (input.signal.aborted) break;
+
     const candidate = eligible[i]!;
+
+    // Expansion only checked that traffic could go here. Claiming happens now,
+    // just before sending, so the half-open trial goes to a request that is
+    // really sent. False means another request already holds the trial, or the
+    // trial failed earlier in this walk and reopened the breaker.
+    if (!isAvailable(candidate.connectionId)) continue;
+    sent += 1;
+
     const connection = getConnection(candidate.connectionId);
     const provider = connection === null ? null : getProvider(connection.providerId);
 
@@ -125,6 +147,18 @@ export async function executeRoute(input: ExecuteInput): Promise<ExecuteOutput> 
         return { response, attempts, winningAttempt: attempts.length - 1, error: null };
       }
 
+      // The adapters turn a fetch abort into an ordinary `timeout` failure
+      // rather than throwing, so the catch below never sees a disconnect. Left
+      // alone, the walk charged the client's departure to a healthy provider's
+      // breaker and then made real, billed calls to the next candidates for
+      // nobody.
+      if (input.signal.aborted) {
+        const gone = clientDisconnected();
+        lastError = gone;
+        attempts.push(failedAttempt(candidate, durationMs, gone));
+        break;
+      }
+
       const err = response.error ?? {
         kind: 'unknown' as const,
         message: `Upstream returned ${response.httpStatus}`,
@@ -143,18 +177,18 @@ export async function executeRoute(input: ExecuteInput): Promise<ExecuteOutput> 
     } catch (thrown) {
       const durationMs = Date.now() - startedAt;
       const aborted = input.signal.aborted;
-      const err: AdapterError = {
-        kind: aborted ? 'network' : controller.signal.aborted ? 'timeout' : 'network',
-        message: aborted
-          ? 'Client disconnected'
-          : controller.signal.aborted
-            ? `Timed out after ${input.timeoutMs}ms`
-            : thrown instanceof Error
-              ? thrown.message
-              : String(thrown),
-        retryAfterSec: null,
-        raw: thrown,
-      };
+      const err: AdapterError = aborted
+        ? { ...clientDisconnected(), raw: thrown }
+        : {
+            kind: controller.signal.aborted ? 'timeout' : 'network',
+            message: controller.signal.aborted
+              ? `Timed out after ${input.timeoutMs}ms`
+              : thrown instanceof Error
+                ? thrown.message
+                : String(thrown),
+            retryAfterSec: null,
+            raw: thrown,
+          };
 
       lastError = err;
       attempts.push(failedAttempt(candidate, durationMs, err));
@@ -169,7 +203,29 @@ export async function executeRoute(input: ExecuteInput): Promise<ExecuteOutput> 
     }
   }
 
+  // Every candidate was skipped because other requests held their trial slots.
+  if (attempts.length === 0 && lastError === null && !input.signal.aborted) {
+    lastError = temporarilyUnavailable();
+  }
+
   return { response: null, attempts, winningAttempt: null, error: lastError };
+}
+
+function temporarilyUnavailable(): AdapterError {
+  return {
+    kind: 'unavailable',
+    message:
+      'Every provider that could serve this request is temporarily out (circuit breaker open ' +
+      'or rate-limit lockout). Retry shortly.',
+    retryAfterSec: null,
+    raw: null,
+  };
+}
+
+const CLIENT_GONE = 'Client disconnected';
+
+function clientDisconnected(): AdapterError {
+  return { kind: 'network', message: CLIENT_GONE, retryAfterSec: null, raw: null };
 }
 
 function failedAttempt(
@@ -209,13 +265,15 @@ function describeFallback(err: AdapterError): string {
     case 'timeout':
       return 'Attempt timed out';
     case 'network':
-      return 'Network failure reaching the provider';
+      return err.message === CLIENT_GONE ? CLIENT_GONE : 'Network failure reaching the provider';
     case 'context_length':
       // Plain ASCII on purpose: these strings reach an HTTP header, where a
       // typographic apostrophe is not representable.
       return "Prompt exceeds this model's context window";
     case 'unsupported':
       return 'Model or feature unavailable here';
+    case 'unavailable':
+      return 'Temporarily unavailable';
     case 'bad_request':
       return 'Request rejected - not retried elsewhere';
     default:

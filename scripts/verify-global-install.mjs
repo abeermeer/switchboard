@@ -18,8 +18,9 @@
  * Run: node scripts/verify-global-install.mjs
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, existsSync, rmSync, readFileSync } from 'node:fs';
+import net from 'node:net';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -123,6 +124,11 @@ try {
       } else {
         console.log('  ok    production build shipped inside the package');
       }
+
+      // `--version` proves the shim exists, not that the server can run. The
+      // installed copy has no dev dependencies (no TypeScript, no Tailwind),
+      // which is exactly the environment a broken runtime import shows up in.
+      if (problems.length === 0) await bootInstalled(binDir);
     }
   }
 } finally {
@@ -136,6 +142,56 @@ try {
       }
     }
   }
+}
+
+/** A port nothing is listening on, so the check never collides with a dev server. */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+async function bootInstalled(binDir) {
+  const port = await freePort();
+  const data = mkdtempSync(join(tmpdir(), 'sb-install-data-'));
+  const shim = isWindows ? join(binDir, 'switchboard.cmd') : join(binDir, 'switchboard');
+  const child = spawn(`"${shim}" start --port ${port}`, {
+    shell: true,
+    detached: !isWindows,
+    stdio: 'ignore',
+    env: { ...process.env, SWITCHBOARD_DATA_DIR: data, SWITCHBOARD_LOG_LEVEL: 'warn' },
+  });
+
+  let status = 0;
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline && status !== 200) {
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    status = await fetch(`http://127.0.0.1:${port}/api/system/status`)
+      .then((res) => res.status)
+      .catch(() => 0);
+  }
+
+  if (isWindows) spawnSync(`taskkill /pid ${child.pid} /t /f`, { shell: true });
+  else {
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      // Already gone.
+    }
+  }
+  try {
+    rmSync(data, { recursive: true, force: true });
+  } catch {
+    // A held WAL file on Windows is not worth failing the check over.
+  }
+
+  if (status === 200) console.log(`  ok    the installed command started a gateway that answers on :${port}`);
+  else problems.push(`\`switchboard start\` from the installed package never answered (last status ${status})`);
 }
 
 for (const problem of problems) console.error(`  FAIL  ${problem}`);

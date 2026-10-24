@@ -19,6 +19,7 @@ import {
   clientMeta,
   corsHeaders,
   jsonError,
+  policyDenied,
   statusForErrorKind,
   typeForErrorKind,
 } from './respond';
@@ -59,6 +60,9 @@ export async function handleModality(
   const requestedModel = typeof body['model'] === 'string' ? body['model'] : 'auto';
   const stream = body['stream'] === true;
 
+  const notAllowed = policyDenied(auth.key, requestedModel, req);
+  if (notAllowed !== null) return notAllowed;
+
   const result = await route({
     modality,
     requestedModel,
@@ -72,6 +76,13 @@ export async function handleModality(
   const settings = getSettings();
   const logPayloads = settings.logPayloads;
 
+  if (result.unrecognizedModel) {
+    requestLogger({ requestId: result.decision.requestId, modality, requestedModel }).warn(
+      'requested model is not recognised; routed as auto',
+      { requestedModel },
+    );
+  }
+
   // ── total failure ─────────────────────────────────────────────────────────
   if (result.response === null || !result.response.ok) {
     const err = result.error ?? {
@@ -82,7 +93,7 @@ export async function handleModality(
     };
     const status = statusForErrorKind(err.kind);
 
-    persist(
+    recordRequest(
       {
         modality,
         requestedModel,
@@ -116,7 +127,7 @@ export async function handleModality(
       tried: result.decision.attempts.map((a) => `${a.providerId}:${a.modelId}=${a.fallbackReason ?? a.status}`),
     });
 
-    const headers: Record<string, string> = { ...traceHeaders(result.decision, 0, null) };
+    const headers: Record<string, string> = { ...traceHeaders(result.decision, 0, null, result.unrecognizedModel) };
     if (err.retryAfterSec !== null) headers['retry-after'] = String(err.retryAfterSec);
 
     return jsonError(status, err.message, typeForErrorKind(err.kind), err.kind, headers, req);
@@ -153,9 +164,8 @@ export async function handleModality(
       if (finished) return;
       finished = true;
       usage = response.usage ?? usage;
-      const settled = settleRequest(attempt?.providerId ?? null, attempt?.modelId ?? null, usage);
 
-      persist(
+      recordRequest(
         {
           modality,
           requestedModel,
@@ -173,19 +183,6 @@ export async function handleModality(
         },
         logPayloads ? { request: body, response: { streamed: true, usage } } : {},
       );
-
-      if (attempt !== null && usage !== null) {
-        recordUsageBucket({
-          ts: startedAt,
-          connectionId: attempt.connectionId,
-          modelId: attempt.modelId,
-          ok: true,
-          promptTokens: usage.promptTokens,
-          completionTokens: usage.completionTokens,
-          costUsd: settled.costUsd,
-          savedUsd: settled.savedUsd,
-        });
-      }
     };
 
     const monitored = response.stream.pipeThrough(
@@ -211,7 +208,7 @@ export async function handleModality(
         // streaming response into a single delayed blob.
         'x-accel-buffering': 'no',
         ...corsHeaders(req),
-        ...traceHeaders(result.decision, 0, model),
+        ...traceHeaders(result.decision, 0, model, result.unrecognizedModel),
       },
     });
   }
@@ -221,7 +218,7 @@ export async function handleModality(
   const settled = settleRequest(attempt?.providerId ?? null, attempt?.modelId ?? null, usage);
   const durationMs = Date.now() - startedAt;
 
-  persist(
+  recordRequest(
     {
       modality,
       requestedModel,
@@ -240,25 +237,12 @@ export async function handleModality(
     logPayloads ? { request: body, response: response.json } : {},
   );
 
-  if (attempt !== null && usage !== null) {
-    recordUsageBucket({
-      ts: startedAt,
-      connectionId: attempt.connectionId,
-      modelId: attempt.modelId,
-      ok: true,
-      promptTokens: usage.promptTokens,
-      completionTokens: usage.completionTokens,
-      costUsd: settled.costUsd,
-      savedUsd: settled.savedUsd,
-    });
-  }
-
   return new Response(JSON.stringify(response.json ?? {}), {
     status: response.httpStatus,
     headers: {
       'content-type': 'application/json',
       ...corsHeaders(req),
-      ...traceHeaders(result.decision, settled.costUsd, model),
+      ...traceHeaders(result.decision, settled.costUsd, model, result.unrecognizedModel),
     },
   });
 }
@@ -293,6 +277,7 @@ function traceHeaders(
   decision: RoutingDecision,
   costUsd: number,
   model: { id: string } | null,
+  unrecognizedModel = false,
 ): Record<string, string> {
   const winner = decision.winningAttempt;
   const attempt = winner === null ? null : (decision.attempts[winner] ?? null);
@@ -317,6 +302,11 @@ function traceHeaders(
     if (chosen !== undefined) headers['x-switchboard-tier'] = chosen.tier;
   }
 
+  // A client that asked for a model the gateway does not know was served
+  // whatever "auto" picked. Its own model name is echoed back so the
+  // substitution is visible from curl, not only in the dashboard.
+  if (unrecognizedModel) headers['x-switchboard-substituted'] = headerSafe(decision.requestedModel);
+
   // Only present when a fallback actually happened, so its presence is itself
   // the signal that the first choice failed.
   const failed = decision.attempts.filter((a) => a.status !== 'success');
@@ -328,7 +318,7 @@ function traceHeaders(
   return headers;
 }
 
-interface PersistInput {
+export interface RequestRecord {
   modality: Modality;
   requestedModel: string;
   decision: RoutingDecision;
@@ -344,7 +334,43 @@ interface PersistInput {
   error: string | null;
 }
 
-function persist(input: PersistInput, payloads: { request?: unknown; response?: unknown }): void {
+/**
+ * Writes the log row and, for a success, the hourly usage rollup.
+ *
+ * Every path that spends money upstream goes through here: the gateway, the
+ * dashboard playground and request replay. The playground and replay used to
+ * route real requests without writing either, so their spend appeared in no
+ * chart, total or per-connection budget, and a connection cap could be blown
+ * from the dashboard without the gateway ever seeing it.
+ */
+export function recordRequest(
+  input: RequestRecord,
+  payloads: { request?: unknown; response?: unknown },
+): void {
+  persist(input, payloads);
+
+  const winner = input.decision.winningAttempt;
+  const attempt = winner === null ? null : (input.decision.attempts[winner] ?? null);
+  if (input.status !== 'success' || attempt === null || input.usage === null) return;
+
+  const settled = settleRequest(attempt.providerId, attempt.modelId, input.usage);
+  try {
+    recordUsageBucket({
+      ts: input.decision.decidedAt,
+      connectionId: attempt.connectionId,
+      modelId: attempt.modelId,
+      ok: true,
+      promptTokens: input.usage.promptTokens,
+      completionTokens: input.usage.completionTokens,
+      costUsd: settled.costUsd,
+      savedUsd: settled.savedUsd,
+    });
+  } catch (err) {
+    logger.error('failed to record usage', { requestId: input.decision.requestId, err });
+  }
+}
+
+function persist(input: RequestRecord, payloads: { request?: unknown; response?: unknown }): void {
   const winner = input.decision.winningAttempt;
   const attempt = winner === null ? null : (input.decision.attempts[winner] ?? null);
 

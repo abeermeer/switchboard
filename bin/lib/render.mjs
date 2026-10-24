@@ -39,13 +39,18 @@ export function table(columns, rows) {
   }
 }
 
-export function banner(port, dataDir) {
-  const url = `http://127.0.0.1:${port}`;
+export function banner(port, dataDir, host = '127.0.0.1', reachAt = '127.0.0.1') {
+  const url = `http://${reachAt.includes(':') ? `[${reachAt}]` : reachAt}:${port}`;
   console.log('');
   console.log(`  ${pc.bold(pc.yellow('Switchboard'))} ${pc.dim('· local-first AI gateway')}`);
   console.log('');
   console.log(`  ${pc.dim('Endpoint  ')}${pc.bold(`${url}/v1`)}`);
   console.log(`  ${pc.dim('Dashboard ')}${url}/dashboard`);
+  if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
+    // Worth saying out loud: this is the switch that puts the gateway on the
+    // network, and an install with no API key yet still refuses remote calls.
+    console.log(`  ${pc.dim('Listening ')}${pc.yellow(`${host}, reachable from other machines`)}`);
+  }
   // Surfaced because it is where the master key lives, and the one path a user
   // needs to know to back up or migrate their install.
   if (dataDir !== undefined) console.log(`  ${pc.dim('Data      ')}${pc.dim(dataDir)}`);

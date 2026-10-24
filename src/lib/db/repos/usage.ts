@@ -211,15 +211,12 @@ export function monthToDateCostForConnection(connectionId: string): number {
 }
 
 export function monthToDateCostForApiKey(apiKeyId: string): number {
-  // usage_buckets has no key dimension, so per-key spend comes from the log.
+  // Its own table, booked alongside each log row: summing the log itself let
+  // retention and "clear logs" reset every key's budget.
   return num(
     scalar(
       getDb()
-        .prepare(
-          `SELECT COALESCE(SUM(cost_usd), 0) AS cost
-             FROM request_log
-            WHERE api_key_id = ? AND ts >= ?`,
-        )
+        .prepare('SELECT cost_usd AS cost FROM api_key_spend WHERE api_key_id = ? AND month_ts = ?')
         .get(apiKeyId, monthStartUtc()),
       'cost',
     ),

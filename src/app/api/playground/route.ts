@@ -1,7 +1,15 @@
 import { z } from 'zod';
-import { route } from '@/lib/router';
+import type { TokenUsage } from '@/types/core';
+import { route, type RouteResult } from '@/lib/router';
+import { getSettings } from '@/lib/db/repos/settings';
+import { recordRequest } from '@/lib/api/handler';
+import { clientMeta, statusForErrorKind } from '@/lib/api/respond';
 import { findModel } from '@/lib/providers/registry';
-import { normalizeUsage, settleRequest } from '@/lib/usage/cost';
+import { settleRequest } from '@/lib/usage/cost';
+// The adapters' normalizer, not the older one in usage/cost: it folds reasoning
+// that a provider reports beside completion (xAI) into the completion count,
+// which is what cost reads. The other one priced xAI reasoning about 98% low.
+import { normalizeUsage } from '@/lib/providers/adapters/shared';
 import { guard, handle, readBody } from '@/lib/api/admin';
 
 export const runtime = 'nodejs';
@@ -33,6 +41,8 @@ export function POST(req: Request): Promise<Response> {
 
     const { models, messages, temperature, maxTokens } = parsed.data;
     const encoder = new TextEncoder();
+    const { ip } = clientMeta(req);
+    const logPayloads = getSettings().logPayloads;
 
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -51,17 +61,49 @@ export function POST(req: Request): Promise<Response> {
             const startedAt = Date.now();
             emit({ model, event: 'start', ts: startedAt });
 
+            const requestBody = {
+              model,
+              messages,
+              stream: true,
+              ...(temperature === undefined ? {} : { temperature }),
+              ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }),
+            };
+            let result: RouteResult | null = null;
+            let usage: TokenUsage | null = null;
+            let ttftMs: number | null = null;
+
+            // Each column is a real, billed request, so it is logged and counted
+            // like one. Without this, playground spend reached no chart, total or
+            // connection budget.
+            const record = (error: string | null, httpStatus = 502): void => {
+              if (result === null) return;
+              recordRequest(
+                {
+                  modality: 'chat',
+                  requestedModel: model,
+                  decision: result.decision,
+                  status: error === null ? 'success' : 'error',
+                  httpStatus: error === null ? 200 : httpStatus,
+                  durationMs: Date.now() - startedAt,
+                  ttftMs,
+                  streamed: true,
+                  usage: error === null ? usage : null,
+                  apiKeyId: null,
+                  ip,
+                  userAgent: 'switchboard/playground',
+                  error,
+                },
+                logPayloads
+                  ? { request: requestBody, response: error === null ? { streamed: true, usage } : { error } }
+                  : {},
+              );
+            };
+
             try {
-              const result = await route({
+              result = await route({
                 modality: 'chat',
                 requestedModel: model,
-                body: {
-                  model,
-                  messages,
-                  stream: true,
-                  ...(temperature === undefined ? {} : { temperature }),
-                  ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }),
-                },
+                body: requestBody,
                 stream: true,
                 apiKey: null,
                 signal: req.signal,
@@ -71,12 +113,9 @@ export function POST(req: Request): Promise<Response> {
               const attempt = winner === null ? null : (result.decision.attempts[winner] ?? null);
 
               if (result.response === null || !result.response.ok || result.response.stream === null) {
-                emit({
-                  model,
-                  event: 'error',
-                  error: result.error?.message ?? 'No provider could serve this model.',
-                  durationMs: Date.now() - startedAt,
-                });
+                const error = result.error?.message ?? 'No provider could serve this model.';
+                emit({ model, event: 'error', error, durationMs: Date.now() - startedAt });
+                record(error, statusForErrorKind(result.error?.kind ?? 'unknown'));
                 return;
               }
 
@@ -94,8 +133,7 @@ export function POST(req: Request): Promise<Response> {
               const reader = result.response.stream.getReader();
               const decoder = new TextDecoder();
               let buffer = '';
-              let ttftMs: number | null = null;
-              let usage = result.response.usage;
+              usage = result.response.usage;
 
               for (;;) {
                 const { done, value } = await reader.read();
@@ -154,13 +192,11 @@ export function POST(req: Request): Promise<Response> {
                 ttftMs,
                 durationMs: Date.now() - startedAt,
               });
+              record(null);
             } catch (err) {
-              emit({
-                model,
-                event: 'error',
-                error: err instanceof Error ? err.message : String(err),
-                durationMs: Date.now() - startedAt,
-              });
+              const error = err instanceof Error ? err.message : String(err);
+              emit({ model, event: 'error', error, durationMs: Date.now() - startedAt });
+              record(error);
             }
           }),
         );

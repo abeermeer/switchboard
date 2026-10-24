@@ -6,6 +6,7 @@ A running record of what was built, why, and what is still open. Newest first.
 
 | Version | What it was |
 | --- | --- |
+| **v0.5.0** | Closes a network takeover present in every earlier version (a spoofed `X-Forwarded-For` gave anyone on the LAN full admin), plus DNS rebinding, CSRF and clickjacking; enforces per-key policies; fixes provider pinning, the Docker image, the desktop app's gateway, the global install, double-billed reasoning tokens, and a health loop that had never once run. **Breaking:** binds `127.0.0.1` by default, production must run through `server.mjs` (`switchboard`, `npm start`, Docker, desktop) rather than bare `next start`, and remote callers need an API key or the dashboard token. |
 | **v0.4.1** | The published install actually works: the npm package is now **`switchboard-gateway`** (plain `switchboard` is someone else's library), `/api/system/status` reports the real version, and CI installs the packed tarball to prove the command exists. |
 | **v0.4.0** | Closes the second round of audit findings: adapter wire-translation tests (adapters 27% → 80%), management API route tests, log retention actually enforced, request payloads redacted before they reach disk, and desktop packaging verified in CI rather than assumed. |
 | **v0.3.0** | Closes every remaining audit finding. **Breaking:** `/v1` no longer sends a wildcard `Access-Control-Allow-Origin`, so a browser client must now list its origin in `SWITCHBOARD_CORS_ORIGINS`. Server-side SDK clients are unaffected. |
@@ -15,6 +16,148 @@ A running record of what was built, why, and what is still open. Newest first.
 Releases are cut automatically by a version bump on `main` — see
 [README](README.md#releases). Never tag by hand; the workflow refuses to move an existing
 tag, so a manual one blocks the real release.
+
+---
+
+## 2026-10-19: An independent review of those fixes
+
+Before calling the branch launchable, a second review ran: four reviewers over security,
+routing, money and operations, and a skeptic per finding trying to refute it against the
+code. 39 of 41 findings survived. Some were regressions the first round introduced, which
+is the argument for reviewing fixes and not only bugs.
+
+### Regressions from the first round
+
+- Catalog ids containing a slash (Groq's `openai/gpt-oss-120b`, every OpenRouter id) were
+  read as provider pins and answered 404. Both readings are now tried and unioned.
+- Candidates the executor skipped (an open breaker) used up `maxAttempts`, so one failed
+  half-open trial on an eight-model connection ended the walk. Only sent requests count.
+- The newly added Claude 5.5 models reject parameters the adapter passes through; every
+  ordinary call failed and tripped the Anthropic breaker. Removed until the adapter copes.
+- 503 "temporarily out" was reported for requests no candidate could ever serve.
+
+### Found while fixing
+
+- **The health loop had never run.** Nothing called `startHealthScheduler()`, not since
+  the first commit: no probes, no latency pruning, and no log retention, so a 30-day
+  retention setting kept every prompt forever. `src/instrumentation.ts` starts it at boot.
+- **The starter policies existed only after a dashboard page rendered**, so an install
+  driven from the CLI or API had no `free-only`, and a request for it routed as an unknown
+  model to paid providers. Seeded at boot now.
+- **`free-only` still spent money** in three ways: OpenRouter's paid models passed the
+  $1/MTok free-tier heuristic (its free tier is now `zeroPricedOnly`), a key restricted to
+  a deleted or disabled policy fell through to the default (now 403 `policy_unavailable`),
+  and OpenAI's Whisper, billed per minute, sat in the catalog at $0 per token and ranked
+  as free (transcription is now `unpriced` and every cost ceiling refuses it).
+- **Every transcription that sent Whisper's optional `prompt` was refused**: the prompt
+  counted as input tokens against a 448-token window the output reservation already
+  filled. No test had ever called the transcription route; two do now.
+
+### Access and operations
+
+- Production without `server.mjs` fails closed instead of trusting `X-Forwarded-For`; a
+  relay with no forwarding header must also present a Host naming this machine; frames
+  are denied; the token cookie is `SameSite=Lax`; a rotated token closes the live stream.
+- `next.config.ts` became `.mjs` (a TS config needs the native SWC binary at start),
+  `.env` is honoured for host and port, SIGTERM drains for up to 10 s, and the CLI no
+  longer flips onto an empty database in the clone.
+
+### Docs that were wrong
+
+- The README pinned users to v0.4.1, which has the takeover, and linked the demo there.
+- "A request relayed by any proxy counts as remote" is false for nginx's default
+  `proxy_pass`, which sends no forwarding header and a loopback Host. Every doc now says
+  what is detected and tells nginx users to add `X-Forwarded-For`.
+- The Docker advice to set `SWITCHBOARD_ALLOW_REMOTE=1` would have trusted every other
+  container on the same network. Removed.
+- The npm name was called "reserved"; nothing has been published under it.
+
+### Still open
+
+- Paid transcription logs $0; spend and budgets cannot see per-minute billing.
+- Claude Sonnet 4.5 retires 2026-11-30 and must leave the catalog then.
+- The catalog entries listed above remain unverified, and the CLAUDE.md known gaps stand.
+
+---
+
+## 2026-10-18: A full review, and fixes for what it found
+
+The user asked whether the repository was ready to leave as finished. Typecheck, 1,036
+tests and the build were all green; the review still found real bugs, because the green
+checks never connected from another machine, never seeded the routing policies a real
+install creates, never built the Docker image, never launched the desktop app, and never
+started the globally installed command. Each item below was reproduced before it was
+fixed (against a running build, or with a test that failed first).
+
+### Security
+
+- **Anyone on the network could take over the dashboard.** `next start` listens on every
+  interface; "local" was decided from `X-Forwarded-For`, which Next only fills in when the
+  client did not send one, so `X-Forwarded-For: 127.0.0.1` from another machine minted a
+  working API key; and the `/dashboard/*` pages had no guard at all.
+  `server.mjs` now serves the app on `127.0.0.1` by default and stamps a verdict read off
+  the socket, `src/proxy.ts` gates every page and API route, and a request carrying a
+  forwarding header counts as remote.
+- **DNS rebinding and CSRF** reached the loopback-bound server through the user's own
+  browser. Only IP literals, `localhost` and `SWITCHBOARD_ALLOWED_HOSTS` are answered;
+  cross-origin admin writes and unlisted browser origins on `/v1` are refused.
+- The dashboard token existed but was never shown anywhere. `sb token` prints it,
+  `/dashboard?token=` swaps it for an HttpOnly cookie, and only a local shell can read or
+  rotate it. With no API key yet, the gateway runs open for local callers only.
+- **"Allowed policies" on a key was stored and never enforced.** Now checked on every
+  gateway request.
+- The database (every logged prompt) was world-readable under the default umask; it and its
+  WAL/SHM files are now 0600.
+
+### Broken features
+
+- **`provider/model` pins fanned out to the whole fleet** once the default `auto` policy
+  existed, which is every real install. Resolution now goes policy slug, pin, catalog model,
+  then the default; an unrecognised model still routes as auto but is flagged with
+  `x-switchboard-substituted`.
+- **The Docker image did not build** (a missing `public/`, and `--omit=optional` dropped
+  Tailwind's and Next's native binaries). Built and run for real.
+- **The desktop app could not start its gateway**: in a packaged app `process.execPath` is
+  the app, so the spawn relaunched Switchboard, which quit on the single-instance lock.
+  Fixed with `ELECTRON_RUN_AS_NODE` and asar off; the Linux build was launched under Xvfb
+  and answered in about 8 seconds. `desktop.yml` now launches both platforms' builds.
+- **A fresh global install could not start**: the caret range on `next` pulled 16.4.2,
+  which could not read the 16.2.11 build in the tarball. `next`/`react` are pinned, and
+  `verify:install` now boots the installed command instead of only running `--version`.
+- The README's install (`npm install -g .`) kept the database inside the clone, contrary to
+  what it said. The CLI now defaults to the OS app-data folder and warns about data left
+  inside a package. The desktop app uses the same folder (the npm rename had silently moved
+  its own).
+- Claude Code via `ANTHROPIC_BASE_URL` was documented but there is no `/v1/messages`;
+  `/v1/moderations` and `/v1/audio/speech` had no backing model. Moderation now uses
+  OpenAI's free `omni-moderation-latest`; the other two are documented as unsupported.
+
+### Money
+
+- Reasoning tokens were billed twice for OpenAI-shaped usage (an o4-mini request 64% high).
+- A client disconnect did not stop the fallback walk: it was charged to a healthy breaker
+  and the next candidates got billed calls for nobody.
+- Playground and replay requests were never logged or counted toward usage or budgets.
+- Per-key budgets were summed from `request_log`, so log retention and "clear logs" reset
+  them. Spend now lives in `api_key_spend` (migration 3).
+- The routing simulator consumed half-open trial slots; expansion now uses a read-only check
+  and the executor claims the slot right before sending.
+- All candidates temporarily out now answers 503 rather than 404; ordinary 400s are no
+  longer misread as `context_length`.
+
+### Catalog
+
+Changed only where a provider page confirmed it: retired Claude 3.7 Sonnet, 3.5 Haiku and
+Opus 4.1 removed; shut-down Gemini 2.0 Flash/Flash-Lite and `text-embedding-004` removed;
+Claude no longer claims `json_mode`, which its adapter cannot translate. Claude Opus 5.5
+and Sonnet 5.5 were added here and taken out again in the review round below.
+
+### Still open
+
+- DeepSeek's pricing (moved to V4 with peak/off-peak rates), the Hyperbolic and Fireworks
+  image endpoints, and Google's free-tier quotas could not be checked from this session.
+- No `/v1/messages`; the known gaps in [CLAUDE.md](CLAUDE.md#known-gaps) otherwise stand.
+- The version was bumped to 0.5.0 in the review round below.
 
 ---
 

@@ -10,6 +10,7 @@ import {
   normalizeUsage,
   settleRequest,
 } from '@/lib/usage/cost';
+import { normalizeUsage as normalizeProviderUsage } from '@/lib/providers/adapters/shared';
 
 /** Builds a TokenUsage without repeating the four fields a case does not use. */
 function tokens(partial: Partial<TokenUsage>): TokenUsage {
@@ -192,30 +193,39 @@ describe('usage/cost', () => {
     });
 
     describe('reasoning tokens', () => {
-      it('bills reasoning tokens at the output rate', () => {
+      // TokenUsage.completionTokens already includes reasoning (OpenAI's own
+      // semantics; providers that report it separately are folded in when the
+      // usage is normalized). reasoningTokens is a breakdown of it.
+
+      it('bills completion tokens, reasoning included, at the output rate', () => {
         // o4-mini output is $4.40/MTok.
         const cost = computeCost(
           findModel('openai', 'o4-mini'),
-          tokens({ reasoningTokens: 1_000_000 }),
+          tokens({ completionTokens: 1_000_000, reasoningTokens: 900_000 }),
         );
         expect(cost).toBeCloseTo(4.4, 10);
       });
 
-      it('treats a reasoning token exactly like a completion token', () => {
-        const model = findModel('openai', 'o4-mini');
-        const asCompletion = computeCost(model, tokens({ completionTokens: 50_000 }));
-        const asReasoning = computeCost(model, tokens({ reasoningTokens: 50_000 }));
-        expect(asReasoning).toBeCloseTo(asCompletion, 12);
-      });
-
-      it('adds reasoning to completion rather than replacing it', () => {
-        // A model that emits 10k visible tokens after 90k of thinking is billed
-        // for 100k of output, not 10k.
+      it('never adds reasoning on top of completion', () => {
+        // A model that emits 10k visible tokens after 90k of thinking reports
+        // completion_tokens: 100k. Adding the 90k again billed 190k, which is
+        // what this used to do.
         const cost = computeCost(
           findModel('openai', 'o4-mini'),
-          tokens({ completionTokens: 10_000, reasoningTokens: 90_000 }),
+          tokens({ completionTokens: 100_000, reasoningTokens: 90_000 }),
         );
         expect(cost).toBeCloseTo((100_000 * 4.4) / 1_000_000, 10);
+      });
+
+      it('prices an OpenAI reasoning response correctly end to end', () => {
+        const usage = normalizeProviderUsage({
+          prompt_tokens: 1_000,
+          completion_tokens: 1_000,
+          total_tokens: 2_000,
+          completion_tokens_details: { reasoning_tokens: 800 },
+        });
+        const cost = computeCost(findModel('openai', 'o4-mini'), usage);
+        expect(cost).toBeCloseTo((1_000 * 1.1 + 1_000 * 4.4) / 1_000_000, 12);
       });
 
       it('does not bill reasoning tokens at the input rate', () => {
@@ -223,7 +233,7 @@ describe('usage/cost', () => {
         // confuse in the assertion.
         const cost = computeCost(
           findModel('openai', 'o4-mini'),
-          tokens({ reasoningTokens: 1_000_000 }),
+          tokens({ completionTokens: 1_000_000, reasoningTokens: 1_000_000 }),
         );
         expect(cost).not.toBeCloseTo(1.1, 6);
       });
@@ -395,8 +405,8 @@ describe('usage/cost', () => {
       it('never reports a negative saving for a model above the baseline', () => {
         // Quality-first routing genuinely picks models that cost more. That is a
         // real outcome, but it is not a negative saving.
-        const settled = settleRequest('anthropic', 'claude-opus-4-1-20250805', ONE_MTOK_EACH);
-        expect(settled.costUsd).toBeCloseTo(90, 10);
+        const settled = settleRequest('anthropic', 'claude-opus-4-5-20251101', ONE_MTOK_EACH);
+        expect(settled.costUsd).toBeCloseTo(30, 10);
         expect(settled.savedUsd).toBe(0);
       });
 
@@ -410,12 +420,11 @@ describe('usage/cost', () => {
         expect(settled.savedUsd).toBe(0);
       });
 
-      it('counts reasoning tokens into the baseline at the output rate', () => {
-        // Otherwise a reasoning model would look like it saved less than it did.
+      it('measures the baseline on completion tokens, reasoning counted once', () => {
         const settled = settleRequest(
           'groq',
           'llama-3.1-8b-instant',
-          tokens({ completionTokens: 0, reasoningTokens: 1_000_000 }),
+          tokens({ completionTokens: 1_000_000, reasoningTokens: 900_000 }),
         );
         expect(settled.savedUsd).toBeCloseTo(15, 10);
       });

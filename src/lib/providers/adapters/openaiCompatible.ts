@@ -67,8 +67,17 @@ function buildFormData(body: Record<string, unknown>, model: string): FormData {
   return form;
 }
 
+/**
+ * Fields that let the upstream choose a model other than the one routed to.
+ * OpenRouter reads `models` as its own fallback list and `route` as how to use
+ * it, so a client could name any model there, including one its key's policy
+ * forbids, and the request was billed and logged as the routed one.
+ */
+const UPSTREAM_MODEL_OVERRIDES = ['models', 'route'];
+
 function buildJsonBody(req: AdapterRequest): Record<string, unknown> {
   const body: Record<string, unknown> = { ...req.body, model: req.model };
+  for (const key of UPSTREAM_MODEL_OVERRIDES) delete body[key];
 
   if (req.stream) {
     body.stream = true;

@@ -1,5 +1,12 @@
 import { route } from '@/lib/router';
-import { authenticate, corsHeaders, jsonError, preflight, statusForErrorKind } from '@/lib/api/respond';
+import {
+  authenticate,
+  corsHeaders,
+  jsonError,
+  policyDenied,
+  preflight,
+  statusForErrorKind,
+} from '@/lib/api/respond';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,6 +34,11 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   const model = form.get('model');
+  const requestedModel = typeof model === 'string' && model.length > 0 ? model : 'auto';
+
+  const notAllowed = policyDenied(auth.key, requestedModel, req);
+  if (notAllowed !== null) return notAllowed;
+
   const body: Record<string, unknown> = { __formData: form };
   for (const [key, value] of form.entries()) {
     if (typeof value === 'string') body[key] = value;
@@ -34,7 +46,7 @@ export async function POST(req: Request): Promise<Response> {
 
   const result = await route({
     modality: 'audio.transcription',
-    requestedModel: typeof model === 'string' && model.length > 0 ? model : 'auto',
+    requestedModel,
     body,
     stream: false,
     apiKey: auth.key,

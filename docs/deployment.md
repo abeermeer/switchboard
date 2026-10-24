@@ -7,7 +7,7 @@ Switchboard is local-first. Everything below assumes you control the machine it 
 ```bash
 npm install
 npm run build
-npm start          # :7272
+npm start          # server.mjs on 127.0.0.1:7272
 ```
 
 Or via the CLI, which prints the endpoint banner and can open the dashboard:
@@ -16,7 +16,12 @@ Or via the CLI, which prints the endpoint banner and can open the dashboard:
 node bin/sb.mjs start --open
 ```
 
-State lives in `./data`:
+Both run `server.mjs`, which binds `127.0.0.1` unless `SWITCHBOARD_HOST` (or
+`sb start --host`) says otherwise, and decides who is local from the socket rather than
+from a header. Bare `next start` skips both; do not use it outside development.
+
+`sb start` keeps state in the OS app-data folder (below, under Desktop); `npm start` and
+`npm run dev` keep it in `./data` unless `SWITCHBOARD_DATA_DIR` is set:
 
 | File | Contents |
 | --- | --- |
@@ -33,10 +38,26 @@ unreadable credentials; the key without the database is nothing.
 docker build -t switchboard .
 docker run -d \
   --name switchboard \
-  -p 7272:7272 \
+  -p 127.0.0.1:7272:7272 \
   -v switchboard-data:/data \
   switchboard
 ```
+
+Inside the container the server listens on `0.0.0.0` (the image sets
+`SWITCHBOARD_HOST`), because the published port arrives on the container's own interface.
+What can reach it is decided by `-p`: `127.0.0.1:7272:7272` keeps it on the host.
+
+Requests through Docker's port forward come from the bridge, so they count as remote. Open
+the dashboard with the token:
+
+```bash
+docker exec switchboard node bin/sb.mjs token
+# then visit http://127.0.0.1:7272/dashboard?token=<token> once
+```
+
+Do not set `SWITCHBOARD_ALLOW_REMOTE=1` to skip that step. Other containers on the same
+Docker network reach the gateway directly, whatever `-p` says, and the flag would give each
+of them the dashboard and an open gateway.
 
 The image is `node:24-slim`, multi-stage, and runs as the unprivileged `node` user.
 Because storage is `node:sqlite` there is no native module to compile, so no
@@ -51,7 +72,7 @@ To inject the master key rather than letting the container generate one:
 docker run -d \
   -e SWITCHBOARD_MASTER_KEY="$(openssl rand -base64 32)" \
   -v switchboard-data:/data \
-  -p 7272:7272 \
+  -p 127.0.0.1:7272:7272 \
   switchboard
 ```
 
@@ -64,7 +85,7 @@ services:
   switchboard:
     build: .
     ports:
-      - '7272:7272'
+      - '127.0.0.1:7272:7272'
     volumes:
       - switchboard-data:/data
     environment:
@@ -77,29 +98,45 @@ volumes:
 
 ## Exposing it beyond localhost
 
-By default the management API refuses anything that is not loopback. That is deliberate:
-the dashboard can create API keys, read stored request payloads and change routing, so it
-is not something to hang off a public interface casually.
+By default the server listens on loopback only, and the dashboard and management API
+refuse anything that is not local. That is deliberate: the dashboard can create API keys,
+read stored request payloads and change routing, so it is not something to hang off a
+public interface casually.
 
-If you need LAN access:
+If you need LAN access, listen on the network and use the dashboard token:
 
 ```bash
-SWITCHBOARD_ALLOW_REMOTE=1 npm start
+sb start --host 0.0.0.0        # or SWITCHBOARD_HOST=0.0.0.0 npm start
+sb token                       # run on the host; prints the dashboard token
 ```
 
-Then non-loopback requests must carry the dashboard token, readable from
-`/api/settings` on the machine itself.
+Open `http://<host>:7272/dashboard?token=<token>` once from the other machine; the token
+becomes an HttpOnly cookie. Scripts send it in the `x-switchboard-token` header. Remote
+gateway callers always need an API key, even before you have created one for local use.
 
-Even so — put it behind a reverse proxy with TLS, or a WireGuard/Tailscale interface. Do
+Even so, put it behind a reverse proxy with TLS, or a WireGuard/Tailscale interface. Do
 not expose it directly to the internet. Anyone who reaches the management API can read
 every prompt you have logged.
 
-If you proxy it, forward `X-Forwarded-For` (the IP check reads it) and disable response
-buffering so streaming works:
+If you proxy it, the forwarding header is what makes a relayed request count as remote.
+`server.mjs` treats any request carrying `X-Forwarded-For`, `Forwarded` or `X-Real-IP` as
+remote. The socket alone cannot tell: a proxy on the same machine connects from
+`127.0.0.1`.
+
+**nginx sends none of those headers unless told to**, and its default `Host` is the
+upstream address. A bare `proxy_pass http://127.0.0.1:7272;` therefore makes every request
+from the internet look like it came from this machine, with full dashboard access. Keep the
+`X-Forwarded-For` line in the block below. Caddy, Traefik and Apache's `mod_proxy` send it
+by default; check anything else before exposing it.
+
+Relayed requests then need the token, or set `SWITCHBOARD_ALLOW_REMOTE=1` if the proxy
+enforces its own authentication. Add the proxy's hostname to `SWITCHBOARD_ALLOWED_HOSTS`,
+keep the original `Host`, and disable response buffering so streaming works:
 
 ```nginx
 location / {
   proxy_pass http://127.0.0.1:7272;
+  proxy_set_header Host $host;
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   proxy_buffering off;
   proxy_read_timeout 900s;
@@ -120,8 +157,8 @@ npm run electron:build:linux   # AppImage + deb
 
 Output lands in `release/`.
 
-The packaged app spawns the gateway as a child process on a free port starting at 7272,
-sets `SWITCHBOARD_PACKAGED=1`, and writes to the OS app-data directory:
+The packaged app runs `server.mjs` as a child Node process on a free port starting at 7272,
+bound to `127.0.0.1`, and writes to the same OS app-data directory as the CLI:
 
 | Platform | Location |
 | --- | --- |
@@ -131,8 +168,16 @@ sets `SWITCHBOARD_PACKAGED=1`, and writes to the OS app-data directory:
 
 Closing the window hides to the tray; the gateway keeps serving. Quit from the tray menu.
 
-Icons belong at `electron/assets/icon.{ico,icns,png}`. The build works without them —
-electron-builder falls back to the stock Electron icon.
+Icons are generated into `electron/assets/` by `npm run icons`. CI's desktop workflow
+builds the Windows and Linux packages, launches each one, and waits for its gateway to
+answer, so an installer that cannot start its server fails the build.
+
+## Stopping
+
+`SIGTERM` or `SIGINT` (Ctrl+C) stops accepting connections and gives in-flight requests up
+to 10 seconds to finish; a stream still running after that is cut. `docker stop` also waits
+10 seconds before it kills the container, so the two line up. A long completion in flight
+during a restart can still be lost.
 
 ## Upgrading
 
